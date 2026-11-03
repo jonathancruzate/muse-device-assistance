@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.jonathancruzate.metamusephonebridge">
+
+    <!-- Muse Phone Bridge: the phone-side control plane that complements
+         MacroDroid (investigation 2026-11-01, report
+         goals/manage-my-smart-home/hidden_files/custom-app-vs-macrodroid-20261101.md).
+         Samsung gates every programmatic mode surface behind
+         signatureOrSystem, so this app owns truth + verification instead:
+         ground truth from the Modes and Routines app's own notifications,
+         desired state from the mode-sync Worker, verified acks only.
+         v1.0.0 = Phase 0 probe + Phase 1 SHADOW reconciler (never fires). -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Reading other apps' packages for the Phase 0 probe (Routines /
+         MacroDroid versions). -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <application
+        android:label="Muse Phone Bridge"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:allowBackup="false"
+        android:theme="@android:style/Theme.Material">
+
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Ground truth: reads the Modes and Routines app's own status
+             notifications on-device (the same dump text the server-side
+             system already treats as ground truth). -->
+        <service android:name=".GroundTruthListener"
+            android:label="Muse Phone Bridge ground truth"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <service android:name=".BridgeService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <receiver android:name=".BootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+</manifest>

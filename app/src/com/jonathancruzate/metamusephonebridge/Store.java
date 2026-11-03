@@ -1,0 +1,73 @@
+package com.jonathancruzate.metamusephonebridge;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+
+/**
+ * All bridge state in one SharedPreferences file: worker settings (entered
+ * on-device, NEVER hardcoded — no secret ships in this APK), the latest
+ * ground truth, the latest desired state, the Away-latch belief, and the
+ * reconciler's last verdict.
+ */
+public final class Store {
+    private static final String PREFS = "bridge";
+
+    // Settings
+    public static final String K_BASE_URL = "base_url";       // e.g. https://jonathancruzate.com/mode-sync
+    public static final String K_SECRET = "secret";           // mode-state poll secret, entered on device
+    public static final String K_SERVICE_ON = "service_on";
+
+    // Ground truth (from GroundTruthListener)
+    public static final String K_GT_MODE = "gt_mode";         // Samsung mode name, e.g. "Home", "Sleep", "None"
+    public static final String K_GT_RUNNING = "gt_running";   // running routines list text
+    public static final String K_GT_RAW = "gt_raw";           // raw dump fields, joined
+    public static final String K_GT_AT = "gt_at";             // epoch ms of last parsed dump
+    public static final String K_GT_PARSE_OK = "gt_parse_ok";
+
+    // Desired state (from the Worker)
+    public static final String K_DESIRED_MODE = "desired_mode"; // house mode: home|night|morning|away
+    public static final String K_DESIRED_SEQ = "desired_seq";
+    public static final String K_DESIRED_AT = "desired_at";
+
+    // Reconciler verdict
+    public static final String K_VERDICT = "verdict";         // in_sync|drift|unknown
+    public static final String K_PLAN = "plan";               // shadow plan text when drift
+    public static final String K_LAST_REPORT_AT = "last_report_at";
+    public static final String K_LAST_REPORT_CODE = "last_report_code";
+
+    private Store() {}
+
+    public static SharedPreferences prefs(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    public static String get(Context ctx, String key, String def) {
+        return prefs(ctx).getString(key, def);
+    }
+
+    public static long getLong(Context ctx, String key, long def) {
+        return prefs(ctx).getLong(key, def);
+    }
+
+    public static boolean getBool(Context ctx, String key, boolean def) {
+        return prefs(ctx).getBoolean(key, def);
+    }
+
+    public static void put(Context ctx, String key, String value) {
+        prefs(ctx).edit().putString(key, value).apply();
+    }
+
+    public static void put(Context ctx, String key, long value) {
+        prefs(ctx).edit().putLong(key, value).apply();
+    }
+
+    public static void put(Context ctx, String key, boolean value) {
+        prefs(ctx).edit().putBoolean(key, value).apply();
+    }
+
+    /** Worker configured = base URL and secret both present. */
+    public static boolean workerConfigured(Context ctx) {
+        return !get(ctx, K_BASE_URL, "").trim().isEmpty()
+                && !get(ctx, K_SECRET, "").trim().isEmpty();
+    }
+}

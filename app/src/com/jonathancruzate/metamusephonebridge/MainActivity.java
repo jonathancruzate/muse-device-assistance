@@ -1,0 +1,227 @@
+package com.jonathancruzate.metamusephonebridge;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.PowerManager;
+import android.provider.Settings;
+import android.text.InputType;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * Setup + status screen. Sections: Phase 0 probe, worker settings
+ * (secret entered here, on-device only), ground truth vs desired with
+ * the reconciler's verdict and shadow plan, service controls, and the
+ * on-device log tail.
+ */
+public class MainActivity extends Activity {
+    private TextView stateView;
+    private TextView probeView;
+    private TextView logView;
+    private EditText baseUrlField;
+    private EditText secretField;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (16 * getResources().getDisplayMetrics().density);
+        root.setPadding(pad, pad, pad, pad);
+
+        TextView title = new TextView(this);
+        title.setText("Muse Phone Bridge");
+        title.setTextSize(22);
+        root.addView(title);
+
+        TextView sub = new TextView(this);
+        sub.setText("Control plane that complements MacroDroid: ground truth, "
+                + "verified acks, drift plans. v1.0.0 runs in SHADOW mode — "
+                + "it observes and reports, it never fires a routine.");
+        root.addView(sub);
+
+        stateView = new TextView(this);
+        stateView.setPadding(0, pad, 0, 0);
+        root.addView(stateView);
+
+        root.addView(button("Refresh status", v -> refresh()));
+
+        root.addView(button("Grant notification access", v -> {
+            Intent i = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
+            startActivity(i);
+        }));
+
+        root.addView(button("Allow unrestricted battery", v -> {
+            try {
+                Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                i.setData(Uri.parse("package:" + getPackageName()));
+                startActivity(i);
+            } catch (Exception e) {
+                Toast.makeText(this, "Open Battery settings manually for this app",
+                        Toast.LENGTH_LONG).show();
+            }
+        }));
+
+        LinearLayout svcRow = new LinearLayout(this);
+        svcRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button startBtn = button("Start bridge", v -> {
+            BridgeService.start(this);
+            toast("Bridge started");
+            refreshSoon();
+        });
+        Button stopBtn = button("Stop bridge", v -> {
+            BridgeService.stop(this);
+            toast("Bridge stopped");
+            refreshSoon();
+        });
+        svcRow.addView(startBtn);
+        svcRow.addView(stopBtn);
+        root.addView(svcRow);
+
+        TextView settingsLabel = new TextView(this);
+        settingsLabel.setText("\nWorker settings (secret lives only on this phone)");
+        settingsLabel.setTextSize(16);
+        root.addView(settingsLabel);
+
+        baseUrlField = new EditText(this);
+        baseUrlField.setHint("Worker base URL, e.g. https://jonathancruzate.com/mode-sync");
+        baseUrlField.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
+        baseUrlField.setText(Store.get(this, Store.K_BASE_URL,
+                "https://jonathancruzate.com/mode-sync"));
+        root.addView(baseUrlField);
+
+        secretField = new EditText(this);
+        secretField.setHint("Mode-state secret (entered on device, never in the APK)");
+        secretField.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        secretField.setText(Store.get(this, Store.K_SECRET, ""));
+        root.addView(secretField);
+
+        root.addView(button("Save worker settings", v -> {
+            Store.put(this, Store.K_BASE_URL, baseUrlField.getText().toString().trim());
+            Store.put(this, Store.K_SECRET, secretField.getText().toString().trim());
+            BridgeLog.log(this, "SETUP", "worker settings saved (configured="
+                    + Store.workerConfigured(this) + ")");
+            toast("Saved");
+            refresh();
+        }));
+
+        root.addView(button("Sync now (fetch desired + report)", v -> {
+            new Thread(() -> {
+                WorkerClient.fetchDesired(this);
+                Reconciler.evaluate(this);
+                WorkerClient.postReport(this, "manual");
+                refreshSoon();
+            }).start();
+            toast("Syncing…");
+        }));
+
+        TextView probeLabel = new TextView(this);
+        probeLabel.setText("\nPhase 0 probe");
+        probeLabel.setTextSize(16);
+        root.addView(probeLabel);
+
+        root.addView(button("Run Phase 0 probe", v -> {
+            new Thread(() -> {
+                String result = Probe.run(this);
+                runOnUiThread(() -> {
+                    probeView.setText(result);
+                });
+            }).start();
+        }));
+
+        probeView = new TextView(this);
+        probeView.setTextIsSelectable(true);
+        root.addView(probeView);
+
+        TextView logLabel = new TextView(this);
+        logLabel.setText("\nBridge log (latest 40)");
+        logLabel.setTextSize(16);
+        root.addView(logLabel);
+
+        logView = new TextView(this);
+        logView.setTextSize(11);
+        logView.setTextIsSelectable(true);
+        root.addView(logView);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(root);
+        setContentView(scroll);
+        refresh();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        refresh();
+    }
+
+    private Button button(String label, View.OnClickListener onClick) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setOnClickListener(onClick);
+        return b;
+    }
+
+    private void toast(String msg) {
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+    }
+
+    private void refreshSoon() {
+        new android.os.Handler(getMainLooper()).postDelayed(this::refresh, 800);
+    }
+
+    private void refresh() {
+        if (stateView == null) return;
+        Reconciler.Verdict v = Reconciler.evaluate(this);
+        SimpleDateFormat fmt = new SimpleDateFormat("HH:mm:ss", Locale.US);
+        long gtAt = Store.getLong(this, Store.K_GT_AT, 0);
+        long desiredAt = Store.getLong(this, Store.K_DESIRED_AT, 0);
+        long reportAt = Store.getLong(this, Store.K_LAST_REPORT_AT, 0);
+        int reportCode = (int) Store.getLong(this, Store.K_LAST_REPORT_CODE, 0);
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("Bridge service: ")
+          .append(Store.getBool(this, Store.K_SERVICE_ON, false) ? "ON" : "OFF").append('\n');
+        sb.append("Worker configured: ").append(Store.workerConfigured(this)).append('\n');
+        sb.append("\nGROUND TRUTH (from Modes and Routines notifications)\n");
+        sb.append("Current mode: ").append(Store.get(this, Store.K_GT_MODE, "—")).append('\n');
+        sb.append("Running: ").append(Store.get(this, Store.K_GT_RUNNING, "—")).append('\n');
+        sb.append("Last dump: ").append(gtAt == 0 ? "never" : fmt.format(new Date(gtAt)))
+          .append(" · parse ok: ").append(Store.getBool(this, Store.K_GT_PARSE_OK, false)).append('\n');
+        sb.append("\nDESIRED (from Worker)\n");
+        sb.append("Mode: ").append(Store.get(this, Store.K_DESIRED_MODE, "—"))
+          .append(" · seq ").append(Store.getLong(this, Store.K_DESIRED_SEQ, -1))
+          .append(" · fetched ").append(desiredAt == 0 ? "never" : fmt.format(new Date(desiredAt)))
+          .append('\n');
+        sb.append("\nVERDICT: ").append(v.state).append('\n');
+        if (v.plan != null && !v.plan.isEmpty()) sb.append("Plan: ").append(v.plan).append('\n');
+        sb.append("Last report: ").append(reportAt == 0 ? "never"
+                : fmt.format(new Date(reportAt)) + " (HTTP " + reportCode + ")").append('\n');
+
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        if (pm != null) {
+            sb.append("Battery unrestricted: ")
+              .append(pm.isIgnoringBatteryOptimizations(getPackageName())).append('\n');
+        }
+        stateView.setText(sb.toString());
+
+        List<String> tail = BridgeLog.tail(this, 40);
+        StringBuilder lb = new StringBuilder();
+        for (String line : tail) lb.append(line).append('\n');
+        logView.setText(lb.toString());
+    }
+}
