@@ -19,8 +19,9 @@ import android.os.IBinder;
  * dies, the server sees silence with a last-known state, instead of
  * discovering it during an incident.
  *
- * SHADOW MODE (v1.0.0): this service never fires a routine. It converges
- * nothing; it observes, verifies, plans, and reports.
+ * SHADOW MODE by default: the service observes, verifies, plans, and
+ * reports. Since v1.3.0 it can fire — only through Actuation's gate
+ * (armed in the UI, night mode only, once per desired sequence).
  */
 public class BridgeService extends Service {
     private static final String CHANNEL = "bridge";
@@ -96,6 +97,7 @@ public class BridgeService extends Service {
                 WorkerClient.fetchDesired(this);
             }
             Reconciler.Verdict v = Reconciler.evaluate(this);
+            Actuation.maybeAct(this, v);
             long gtAt = Store.getLong(this, Store.K_GT_AT, 0);
             long lastReport = Store.getLong(this, Store.K_LAST_REPORT_AT, 0);
             boolean changed = gtAt != lastReportedGtAt || !v.state.equals(lastReportedVerdict);
@@ -119,8 +121,9 @@ public class BridgeService extends Service {
         String mode = Reconciler.resolveObservedMode(
                 Store.get(this, Store.K_GT_MODE, "?"), Store.get(this, Store.K_GT_RUNNING, ""));
         String desired = Store.get(this, Store.K_DESIRED_MODE, "?");
+        boolean armed = Store.getBool(this, Store.K_ACT_ARMED, false);
         String text = "Mode: " + mode + " · Desired: " + desired + " · " + v.state
-                + " (shadow — observing only)";
+                + (armed ? " (Phase 2 ARMED — night only)" : " (shadow — observing only)");
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (nm != null) nm.notify(1, statusNotification(text));
     }

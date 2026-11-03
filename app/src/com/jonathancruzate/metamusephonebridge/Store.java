@@ -44,6 +44,22 @@ public final class Store {
     public static final String K_LAST_REPORT_AT = "last_report_at";
     public static final String K_LAST_REPORT_CODE = "last_report_code";
 
+    // Phase 2 actuation (v1.3) — night mode only, OFF unless armed here.
+    // A routine is fired through the launch-shortcut intent Samsung itself
+    // minted when the routine was linked on-device (CREATE_SHORTCUT flow);
+    // the intent URI lives only in these prefs, never in the APK.
+    public static final String K_ACT_ARMED = "act_armed";           // default false
+    public static final String K_LINK_NIGHT = "link_night";         // intent URI for Switch Sleep
+    public static final String K_LINK_HOME = "link_home";
+    public static final String K_LINK_MORNING = "link_morning";
+    public static final String K_LINK_AWAY = "link_away";
+    public static final String K_LINK_NAME_NIGHT = "link_name_night";
+    public static final String K_LINK_NAME_HOME = "link_name_home";
+    public static final String K_LINK_NAME_MORNING = "link_name_morning";
+    public static final String K_LINK_NAME_AWAY = "link_name_away";
+    public static final String K_ACT_FIRED_SEQ = "act_fired_seq";   // desired seq already fired for
+    public static final String K_ACT_LAST_LOG = "act_last_log";     // throttle for repeated actuation logs
+
     private Store() {}
 
     public static SharedPreferences prefs(Context ctx) {

@@ -154,10 +154,11 @@ phone-side steps. An on-device app owns all three:
   `adb_port` from `adb-keepalive.state.json`) is to be repointed at the
   latest reported endpoint — tracked with the `/phone-bridge/report`
   Worker endpoint work.
-- The full local shell (designed, not built; renumbered to v1.3 when
-  v1.2.0 shipped the calibration fix below): the app pairs once in-app
-  (LADB pattern) and holds a loopback ADB connection, pulling
-  allowlisted shell commands down the Worker channel.
+- The full local shell (designed, not built; renumbered twice — it is
+  now the v1.4 target, after v1.2.0 took the calibration fix and
+  v1.3.0 took Phase 2 actuation): the app pairs once in-app (LADB
+  pattern) and holds a loopback ADB connection, pulling allowlisted
+  shell commands down the Worker channel.
 
 ### Build record — v1.1.0 (2026-11-03)
 
@@ -201,3 +202,38 @@ field 1 stays "None". The v1.1.0 reconciler scored it "drift".
   reported observed.mode "Home" (raw_mode "None", running "Auto rotate,
   At Home, or 2 others"), verdict **in_sync**, **ack true** — the first
   verified ack the bridge has produced.
+
+## v1.3.0 — Phase 2 actuation machinery, shipped DISARMED (2026-11-03)
+
+The first rung of replacing MacroDroid's mode macros: the bridge can
+now fire a routine itself — behind gates, night mode only, and OFF by
+default. The firing mechanism is capture-based: RoutineLaunchActivity's
+extras contract was never decompiled, so the app never hand-builds
+intents. Linking runs Samsung's own CREATE_SHORTCUT picker once per
+routine (the same capture MacroDroid's shortcut action performs) and
+stores the minted launch intent on-device; firing replays exactly that
+intent. On the live build (Routines 5.1.02.9), `ShortcutCreationActivity`
+resolves for CREATE_SHORTCUT — verified over ADB.
+
+- **Actuation gate (`Actuation`)**: fires only when the UI arm switch is
+  ON (default OFF), desired=night, the verdict is drift on a fresh
+  parse-verified dump, and that desired sequence has not been fired for.
+  The Away latch co-running or an unlinked routine logs (throttled) and
+  does not fire. Verification is the loop: the next dump recomputes the
+  verdict, so a fire that fails to engage shows as continued drift.
+- **UI**: Phase 2 section — arm checkbox, per-mode link buttons, a
+  test-fire button for Night, linked/armed status.
+- Gates to live firing (link → shadow-diff nights → arm) and the
+  rollback story: `docs/phase2-actuation-2026-11-03.md`.
+
+### Build record — v1.3.0 (2026-11-03)
+
+- APK: `app/Muse-Phone-Bridge-1.3.0.apk`, 144,629 bytes,
+  SHA-256 `3db4853404be6e29936267bf7b87ab065cdd98585a6085de97ea5485e2af1db3`
+- Same signing cert (`4dcb45fa…`); installed over v1.2.0 via ADB
+  (versionCode 4 verified).
+- Build guards: 20 app classes in the root dex, zero `androidx`.
+- **Disarmed verification:** post-install report from the new build —
+  observed "Home" (raw "None"), verdict **in_sync**, **ack true**, no
+  plan; actuation armed=false and no routines linked, so no fire is
+  possible in the shipped state.

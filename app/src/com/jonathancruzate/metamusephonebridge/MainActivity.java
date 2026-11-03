@@ -30,6 +30,8 @@ public class MainActivity extends Activity {
     private TextView stateView;
     private TextView adbView;
     private android.widget.CheckBox healCheck;
+    private TextView actView;
+    private android.widget.CheckBox armCheck;
     private TextView probeView;
     private TextView logView;
     private EditText baseUrlField;
@@ -51,8 +53,8 @@ public class MainActivity extends Activity {
 
         TextView sub = new TextView(this);
         sub.setText("Control plane that complements MacroDroid: ground truth, "
-                + "verified acks, drift plans. v1.0.0 runs in SHADOW mode — "
-                + "it observes and reports, it never fires a routine.");
+                + "verified acks, drift plans. Shadow by default — Phase 2 "
+                + "actuation (night only) stays OFF unless armed below.");
         root.addView(sub);
 
         stateView = new TextView(this);
@@ -123,6 +125,46 @@ public class MainActivity extends Activity {
             }
             AdbBridge.startDiscovery(this);
             toast("Discovering…");
+            refreshSoon();
+        }));
+
+        TextView actLabel = new TextView(this);
+        actLabel.setText("\nPhase 2 actuation — night mode only, OFF by default");
+        actLabel.setTextSize(16);
+        root.addView(actLabel);
+
+        TextView actHint = new TextView(this);
+        actHint.setText("Linking opens Samsung's routine picker — pick the matching "
+                + "Switch routine once; its launch shortcut is stored on this phone "
+                + "only. Arming lets the bridge fire Night itself when the Worker "
+                + "asks and a fresh dump shows drift (once per request).");
+        root.addView(actHint);
+
+        actView = new TextView(this);
+        actView.setTextIsSelectable(true);
+        root.addView(actView);
+
+        armCheck = new android.widget.CheckBox(this);
+        armCheck.setText("ARM Phase 2: fire the Night routine on drift (all other modes stay shadow)");
+        armCheck.setChecked(Store.getBool(this, Store.K_ACT_ARMED, false));
+        armCheck.setOnCheckedChangeListener((v, checked) -> {
+            Store.put(this, Store.K_ACT_ARMED, checked);
+            BridgeLog.log(this, "ACT", "Phase 2 actuation " + (checked ? "ARMED" : "DISARMED") + " from UI");
+            refresh();
+        });
+        root.addView(armCheck);
+
+        root.addView(button("Link routine: Night (Switch Sleep mode)", v -> startLink("night", 61)));
+        root.addView(button("Link routine: Home", v -> startLink("home", 62)));
+        root.addView(button("Link routine: Morning", v -> startLink("morning", 63)));
+        root.addView(button("Link routine: Away latch", v -> startLink("away", 64)));
+        root.addView(button("Test fire: Night routine", v -> {
+            if (!RoutineFirer.isLinked(this, "night")) {
+                toast("Night routine not linked yet");
+                return;
+            }
+            boolean ok = RoutineFirer.fire(this, "night");
+            toast(ok ? "Fired Night routine" : "Fire failed — see log");
             refreshSoon();
         }));
 
@@ -204,6 +246,57 @@ public class MainActivity extends Activity {
         refresh();
     }
 
+    private void startLink(String houseMode, int requestCode) {
+        if (!RoutineFirer.linkFlowAvailable(this)) {
+            BridgeLog.log(this, "LINK", "CREATE_SHORTCUT picker NOT resolvable on this "
+                    + "build — link flow unavailable for " + houseMode);
+            toast("Samsung's shortcut picker isn't available on this build — see log");
+            return;
+        }
+        try {
+            startActivityForResult(RoutineFirer.buildLinkIntent(), requestCode);
+        } catch (Exception e) {
+            BridgeLog.log(this, "LINK", "startActivityForResult failed for " + houseMode
+                    + ": " + e.getClass().getSimpleName() + " " + e.getMessage());
+            toast("Could not open the routine picker — see log");
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        String mode;
+        switch (requestCode) {
+            case 61: mode = "night"; break;
+            case 62: mode = "home"; break;
+            case 63: mode = "morning"; break;
+            case 64: mode = "away"; break;
+            default: return;
+        }
+        if (resultCode != RESULT_OK || data == null) {
+            BridgeLog.log(this, "LINK", "link cancelled for " + mode);
+            refresh();
+            return;
+        }
+        Intent shortcut = null;
+        try {
+            shortcut = data.getParcelableExtra(Intent.EXTRA_SHORTCUT_INTENT);
+        } catch (Exception ignored) {}
+        String name = data.getStringExtra(Intent.EXTRA_SHORTCUT_NAME);
+        if (shortcut == null) {
+            BridgeLog.log(this, "LINK", "picker returned NO shortcut intent for " + mode
+                    + " — the CREATE_SHORTCUT contract is not honored on this build");
+            toast("Picker returned no shortcut — see log");
+            refresh();
+            return;
+        }
+        Store.put(this, RoutineFirer.linkKey(mode), shortcut.toUri(Intent.URI_INTENT_SCHEME));
+        if (name != null) Store.put(this, RoutineFirer.linkNameKey(mode), name);
+        BridgeLog.log(this, "LINK", "linked " + mode + " -> " + name);
+        toast("Linked " + mode + (name != null ? ": " + name : ""));
+        refresh();
+    }
+
     private Button button(String label, View.OnClickListener onClick) {
         Button b = new Button(this);
         b.setText(label);
@@ -270,6 +363,25 @@ public class MainActivity extends Activity {
             ab.append("Discovered services: ")
               .append(Store.get(this, Store.K_ADB_ENDPOINTS_JSON, "[]")).append('\n');
             adbView.setText(ab.toString());
+        }
+
+        if (actView != null) {
+            StringBuilder av = new StringBuilder();
+            av.append("Actuation armed: ")
+              .append(Store.getBool(this, Store.K_ACT_ARMED, false)).append('\n');
+            for (String m : new String[]{"night", "home", "morning", "away"}) {
+                av.append("Linked ").append(m).append(": ");
+                if (RoutineFirer.isLinked(this, m)) {
+                    String n = RoutineFirer.linkedName(this, m);
+                    av.append(n.isEmpty() ? "yes" : n);
+                } else {
+                    av.append("not linked");
+                }
+                av.append('\n');
+            }
+            av.append("Last fired seq: ")
+              .append(Store.getLong(this, Store.K_ACT_FIRED_SEQ, -1)).append('\n');
+            actView.setText(av.toString());
         }
 
         List<String> tail = BridgeLog.tail(this, 40);
