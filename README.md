@@ -127,3 +127,44 @@ committed).
   Worker secret is a runtime value entered on-device).
 - Built at Jonathan's go-ahead (2026-11-03 00:13 EST) in the side chat
   "Request voicemail and Macrodroid APKs".
+
+## v1.1.0 — ADB endpoint discovery + self-heal (2026-11-03)
+
+Jonathan's addition: use the app as the ADB bridge. The VM-side adb
+channel's killers were all phone-side — the wireless-debugging pairing
+lapsed on toggles, the adbd port changed (41531 → 40983) so stored-port
+consumers dialed a dead endpoint, and every recovery needed manual
+phone-side steps. An on-device app owns all three:
+
+- **Discovery (`AdbBridge`):** wireless debugging advertises
+  `_adb-tls-connect._tcp` (and `_adb-tls-pairing._tcp` while a pairing
+  window is open) over mDNS. The app discovers both via `NsdManager`
+  (multicast lock held), resolves them to host:port, flags the endpoint
+  whose host is the phone's own Wi-Fi address, stores it, includes it in
+  every Worker report (`adb` object), and logs an endpoint **change** as
+  a first-class event.
+- **Self-heal:** if the app holds `WRITE_SECURE_SETTINGS`, it re-enables
+  wireless debugging (`Settings.Global adb_wifi_enabled`) whenever a
+  bridge cycle finds it off. The grant is one-time, done while ADB is up:
+  `adb shell pm grant com.jonathancruzate.metamusephonebridge android.permission.WRITE_SECURE_SETTINGS`.
+  Heals are logged and reported; a UI switch can disarm self-heal.
+  Without the grant, the app logs the need (at most every 6 h) and
+  surfaces it on the status screen.
+- The server-side consumer (`adb-ensure.sh`, which today reads a static
+  `adb_port` from `adb-keepalive.state.json`) is to be repointed at the
+  latest reported endpoint — tracked with the `/phone-bridge/report`
+  Worker endpoint work.
+- v1.2 (designed, not built): the full local shell — the app pairs once
+  in-app (LADB pattern) and holds a loopback ADB connection, pulling
+  allowlisted shell commands down the Worker channel.
+
+### Build record — v1.1.0 (2026-11-03)
+
+- APK: `app/Muse-Phone-Bridge-1.1.0.apk`, 140,533 bytes,
+  SHA-256 `e7dbf5e194a93750ff73b5d54327a662338461bb019f5443c68b243fe67856fb`
+- Same signing cert as v1.0.0 (`4dcb45fa…`) — installs over it in place.
+- Verified: apksigner; aapt2 badging (versionCode 2 / 1.1.0, new
+  permissions incl. `NEARBY_WIFI_DEVICES` with `neverForLocation`);
+  build guards — 18 app classes in the root dex, zero `androidx`;
+  `_adb-tls-connect` present in dex strings; no secrets, no MacroDroid
+  relay strings.

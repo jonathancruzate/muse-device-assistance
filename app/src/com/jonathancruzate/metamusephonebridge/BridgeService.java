@@ -63,6 +63,7 @@ public class BridgeService extends Service {
         thread.start();
         handler = new Handler(thread.getLooper());
         BridgeLog.log(this, "SERVICE", "created");
+        AdbBridge.startDiscovery(this);
         handler.post(this::cycle);
     }
 
@@ -89,6 +90,7 @@ public class BridgeService extends Service {
 
     private void cycle() {
         try {
+            AdbBridge.tick(this);
             boolean configured = Store.workerConfigured(this);
             if (configured) {
                 WorkerClient.fetchDesired(this);

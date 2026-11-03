@@ -21,6 +21,18 @@
     <!-- Reading other apps' packages for the Phase 0 probe (Routines /
          MacroDroid versions). -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!-- ADB bridge (v1.1): mDNS discovery of the phone's own wireless
+         debugging services (_adb-tls-connect / _adb-tls-pairing). -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+    <!-- ADB self-heal: re-enable wireless debugging when it drops. NOT
+         granted at install for a sideloaded app — granted once, while ADB
+         is up, via: adb shell pm grant
+         com.jonathancruzate.metamusephonebridge
+         android.permission.WRITE_SECURE_SETTINGS -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
     <application
         android:label="Muse Phone Bridge"

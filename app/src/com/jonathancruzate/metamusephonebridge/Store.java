@@ -29,6 +29,15 @@ public final class Store {
     public static final String K_DESIRED_SEQ = "desired_seq";
     public static final String K_DESIRED_AT = "desired_at";
 
+    // ADB bridge (v1.1)
+    public static final String K_ADB_ENDPOINT = "adb_endpoint";       // "ip:port" of _adb-tls-connect
+    public static final String K_ADB_ENDPOINT_AT = "adb_endpoint_at"; // epoch ms of last endpoint/pairing update
+    public static final String K_ADB_ENDPOINTS_JSON = "adb_endpoints_json";
+    public static final String K_ADB_PAIRING_OPEN = "adb_pairing_open";
+    public static final String K_ADB_HEAL_ON = "adb_heal_on";         // self-heal armed (default true)
+    public static final String K_ADB_HEAL_LAST_LOG = "adb_heal_last_log";
+    public static final String K_ADB_WIFI_IP = "adb_wifi_ip";
+
     // Reconciler verdict
     public static final String K_VERDICT = "verdict";         // in_sync|drift|unknown
     public static final String K_PLAN = "plan";               // shadow plan text when drift

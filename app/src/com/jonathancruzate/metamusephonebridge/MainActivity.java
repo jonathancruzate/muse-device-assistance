@@ -28,6 +28,8 @@ import java.util.Locale;
  */
 public class MainActivity extends Activity {
     private TextView stateView;
+    private TextView adbView;
+    private android.widget.CheckBox healCheck;
     private TextView probeView;
     private TextView logView;
     private EditText baseUrlField;
@@ -90,6 +92,39 @@ public class MainActivity extends Activity {
         svcRow.addView(startBtn);
         svcRow.addView(stopBtn);
         root.addView(svcRow);
+
+        TextView adbLabel = new TextView(this);
+        adbLabel.setText("\nADB bridge — endpoint discovery + self-heal");
+        adbLabel.setTextSize(16);
+        root.addView(adbLabel);
+
+        adbView = new TextView(this);
+        adbView.setTextIsSelectable(true);
+        root.addView(adbView);
+
+        healCheck = new android.widget.CheckBox(this);
+        healCheck.setText("Self-heal: re-enable wireless debugging when it turns off "
+                + "(needs the one-time WRITE_SECURE_SETTINGS grant)");
+        healCheck.setChecked(Store.getBool(this, Store.K_ADB_HEAL_ON, true));
+        healCheck.setOnCheckedChangeListener((v, checked) -> {
+            Store.put(this, Store.K_ADB_HEAL_ON, checked);
+            BridgeLog.log(this, "ADB_HEAL", "self-heal " + (checked ? "ARMED" : "DISARMED") + " from UI");
+            refresh();
+        });
+        root.addView(healCheck);
+
+        root.addView(button("Rediscover ADB endpoint", v -> {
+            if (android.os.Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission(android.Manifest.permission.NEARBY_WIFI_DEVICES)
+                            != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{android.Manifest.permission.NEARBY_WIFI_DEVICES}, 41);
+                toast("Grant Nearby Wi-Fi, then tap Rediscover again");
+                return;
+            }
+            AdbBridge.startDiscovery(this);
+            toast("Discovering…");
+            refreshSoon();
+        }));
 
         TextView settingsLabel = new TextView(this);
         settingsLabel.setText("\nWorker settings (secret lives only on this phone)");
@@ -218,6 +253,24 @@ public class MainActivity extends Activity {
               .append(pm.isIgnoringBatteryOptimizations(getPackageName())).append('\n');
         }
         stateView.setText(sb.toString());
+
+        if (adbView != null) {
+            long epAt = Store.getLong(this, Store.K_ADB_ENDPOINT_AT, 0);
+            StringBuilder ab = new StringBuilder();
+            ab.append("Wireless debugging: ")
+              .append(AdbBridge.wirelessDebuggingOn(this) ? "ON" : "OFF").append('\n');
+            ab.append("WRITE_SECURE_SETTINGS grant: ")
+              .append(AdbBridge.secureSettingsGranted(this) ? "GRANTED" : "not granted").append('\n');
+            ab.append("Connect endpoint: ")
+              .append(Store.get(this, Store.K_ADB_ENDPOINT, "—"))
+              .append(epAt == 0 ? "" : " (updated " + fmt.format(new Date(epAt)) + ")").append('\n');
+            ab.append("Pairing window advertised: ")
+              .append(Store.getBool(this, Store.K_ADB_PAIRING_OPEN, false)).append('\n');
+            ab.append("Wi-Fi IP: ").append(AdbBridge.wifiIp(this)).append('\n');
+            ab.append("Discovered services: ")
+              .append(Store.get(this, Store.K_ADB_ENDPOINTS_JSON, "[]")).append('\n');
+            adbView.setText(ab.toString());
+        }
 
         List<String> tail = BridgeLog.tail(this, 40);
         StringBuilder lb = new StringBuilder();

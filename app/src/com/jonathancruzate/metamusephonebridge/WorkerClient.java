@@ -44,7 +44,7 @@ public final class WorkerClient {
             HttpURLConnection c = (HttpURLConnection) url.openConnection();
             c.setConnectTimeout(10000);
             c.setReadTimeout(10000);
-            c.setRequestProperty("User-Agent", "MusePhoneBridge/1.0");
+            c.setRequestProperty("User-Agent", "MusePhoneBridge/1.1");
             int code = c.getResponseCode();
             if (code != 200) {
                 BridgeLog.log(ctx, "WORKER", "mode-state GET -> HTTP " + code);
@@ -109,6 +109,7 @@ public final class WorkerClient {
             body.put("ack", "in_sync".equals(verdict));
             body.put("plan", Store.get(ctx, Store.K_PLAN, ""));
             body.put("status", StatusProducer.produce(ctx));
+            body.put("adb", AdbBridge.snapshot(ctx));
 
             URL url = new URL(base + "/phone-bridge/report?secret="
                     + URLEncoder.encode(secret, "UTF-8"));
@@ -117,7 +118,7 @@ public final class WorkerClient {
             c.setReadTimeout(10000);
             c.setRequestMethod("POST");
             c.setRequestProperty("Content-Type", "application/json");
-            c.setRequestProperty("User-Agent", "MusePhoneBridge/1.0");
+            c.setRequestProperty("User-Agent", "MusePhoneBridge/1.1");
             c.setDoOutput(true);
             byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
             try (OutputStream os = c.getOutputStream()) {
