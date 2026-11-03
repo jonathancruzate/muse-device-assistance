@@ -112,6 +112,7 @@ public final class WorkerClient {
             body.put("plan", Store.get(ctx, Store.K_PLAN, ""));
             body.put("status", StatusProducer.produce(ctx));
             body.put("adb", AdbBridge.snapshot(ctx));
+            body.put("tailscale", TailscaleGuard.snapshot(ctx));
 
             URL url = new URL(base + "/phone-bridge/report?secret="
                     + URLEncoder.encode(secret, "UTF-8"));

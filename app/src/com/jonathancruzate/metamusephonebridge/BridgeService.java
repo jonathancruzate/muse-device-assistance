@@ -92,6 +92,7 @@ public class BridgeService extends Service {
     private void cycle() {
         try {
             AdbBridge.tick(this);
+            TailscaleGuard.tick(this);
             boolean configured = Store.workerConfigured(this);
             if (configured) {
                 WorkerClient.fetchDesired(this);

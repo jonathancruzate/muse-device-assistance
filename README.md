@@ -237,3 +237,29 @@ resolves for CREATE_SHORTCUT — verified over ADB.
   observed "Home" (raw "None"), verdict **in_sync**, **ack true**, no
   plan; actuation armed=false and no routines linked, so no fire is
   possible in the shipped state.
+
+## v1.3.1 — Tailscale guardian (2026-11-03)
+
+Jonathan's idea the same night ("We can self heal tailscale with the
+app"), after the phone vanished from the tailnet mid-session and every
+VM-side heal step worked except the last hop. `TailscaleGuard` asserts
+Android's `always_on_vpn_app` secure setting for Tailscale each cycle
+(the bridge already holds the WRITE_SECURE_SETTINGS grant), making the
+OS itself the reviver; detects the tailnet interface (100.64.0.0/10)
+and Tailscale's battery-exemption state; reports a `tailscale` object
+in every Worker report; and falls back to launching Tailscale's UI if
+the interface stays down 10+ minutes. Design + verification protocol:
+`docs/tailscale-guardian-2026-11-03.md`.
+
+### Build record — v1.3.1 (2026-11-03)
+
+- APK: `app/Muse-Phone-Bridge-1.3.1.apk`, 144,629 bytes,
+  SHA-256 `556bf75f157a50a2e701d03906d3e8953761913f474067846aca8fc0356ad6d2`
+- Same signing cert (`4dcb45fa…`) — installs over v1.3.0 in place.
+- Build guards: 21 app classes in the root dex, zero `androidx`;
+  `TS_GUARD` / `always_on_vpn_app` present in dex strings.
+- Worker: mode-sync sanitizer extended for the `tailscale` object and
+  redeployed (bindings preserved).
+- Install note: the ADB lane was down at build time (the very failure
+  this version answers), so the APK was delivered in chat for on-device
+  install; the kill-test verification follows the guardian doc.
