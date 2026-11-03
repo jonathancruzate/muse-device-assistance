@@ -60,9 +60,13 @@ public final class Store {
     public static final String K_ACT_FIRED_SEQ = "act_fired_seq";   // desired seq already fired for
     public static final String K_ACT_LAST_LOG = "act_last_log";     // throttle for repeated actuation logs
 
-    // Tailscale guardian (v1.3.1)
+    // Tailscale guardian (v1.3.1 detection; v1.3.2 reviver)
     public static final String K_TS_DOWN_SINCE = "ts_down_since";   // epoch ms tailnet first seen down (0 = up)
-    public static final String K_TS_LAST_LAUNCH = "ts_last_launch"; // epoch ms of last fallback launch attempt
+    public static final String K_TS_LAST_LAUNCH = "ts_last_launch"; // epoch ms of last revive launch attempt
+    public static final String K_TS_LAUNCH_COUNT = "ts_launch_count"; // revive attempts in the current episode
+    public static final String K_TS_DOWN_COUNT = "ts_down_count";   // cumulative down episodes observed
+    public static final String K_TS_LAST_RECOVERED = "ts_last_recovered"; // epoch ms of last recovery
+    public static final String K_TS_NOTIFIED = "ts_notified";       // escalation notification posted this episode
 
     private Store() {}
 

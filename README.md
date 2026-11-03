@@ -263,3 +263,39 @@ the interface stays down 10+ minutes. Design + verification protocol:
 - Install note: the ADB lane was down at build time (the very failure
   this version answers), so the APK was delivered in chat for on-device
   install; the kill-test verification follows the guardian doc.
+
+## v1.3.2 — Tailscale reviver (2026-11-03)
+
+The v1.3.1 guardian's always-on assertion failed its live test: after
+~12 minutes of assertion cycles the Settings UI still showed Always-on
+OFF (Jonathan checked and switched it on manually; the 02:36 EST
+heartbeat report confirmed `battery_exempt: true`). Research verdict:
+the only programmatic always-on read/write is
+`DevicePolicyManager.get/setAlwaysOnVpnPackage`, restricted to
+device-owner / profile-owner (MDM) apps — the legacy
+`Settings.Secure` key `always_on_vpn_app` is not a live store on
+modern Android, so a regular app cannot set always-on for another
+app. v1.3.2 removes the assertion entirely and makes the guardian the
+reviver itself: 60-second tailnet detection (an up interface holding a
+100.64.0.0/10 address), an immediate Tailscale relaunch attempt on the
+first down cycle, backoff retries at 2/5/15/30 minutes, one tappable
+"Tailscale is down" notification per episode after 5 minutes, and
+recovery logging. Reports carry
+`{installed, up, ip, battery_exempt, reviver_armed, down_since, down_count, last_recovered_ms}`.
+The OS always-on toggle, set manually by the user, remains
+complementary and user-owned. Full record:
+`docs/tailscale-reviver-2026-11-03.md`.
+
+### Build record — v1.3.2 (2026-11-03)
+
+- APK: `app/Muse-Phone-Bridge-1.3.2.apk`, 144,629 bytes,
+  SHA-256 `1f2055ca02987af63cfea50d9610200223b2ec73d3ba4a7601a2d9ea7cd45cae`
+- Same signing cert (`4dcb45fa…`) — installs over v1.3.1 in place.
+- Build guards: zero `always_on_vpn_app` references in the dex (the
+  assertion is gone); `reviver_armed` present in dex strings.
+- Worker: mode-sync sanitizer updated for the reviver report shape
+  and redeployed (bindings preserved).
+- Live verification: the report at 2026-11-03T07:43:06Z carried the
+  new shape with `reviver_armed=true`, `up=true`,
+  `battery_exempt=true`, verdict **in_sync**. The off/on episode test
+  was pending at snapshot time.

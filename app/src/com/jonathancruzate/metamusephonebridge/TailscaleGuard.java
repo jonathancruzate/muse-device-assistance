@@ -1,11 +1,12 @@
 package com.jonathancruzate.metamusephonebridge;
 
-import android.Manifest;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.os.PowerManager;
-import android.provider.Settings;
 
 import org.json.JSONObject;
 
@@ -15,44 +16,51 @@ import java.net.NetworkInterface;
 import java.util.Collections;
 
 /**
- * Tailscale guardian, v1.3.1 (Jonathan's idea, 2026-11-03 02:16 EST —
- * "We can self heal tailscale with the app").
+ * Tailscale guardian, v1.3.2 — the reviver design.
  *
- * The failure it answers: on 2026-11-03 the phone vanished from the
- * tailnet after a network change; every VM-side heal step worked
- * (fresh endpoint, fresh port, fresh forwarder) and the last hop was
- * still dead, because nothing on the phone owned Tailscale's survival.
- * The VM cannot revive a killed VPN app. The phone can:
+ * History: v1.3.1 asserted Android's legacy secure setting
+ * "always_on_vpn_app" each cycle so the OS would relaunch Tailscale.
+ * Live test, 2026-11-03: after ~12 minutes of assertion cycles the
+ * Settings UI still showed Always-on OFF (Jonathan checked and
+ * switched it on manually). Research confirmed why: on modern
+ * Android the only programmatic always-on read/write is
+ * DevicePolicyManager.get/setAlwaysOnVpnPackage, restricted to
+ * device-owner / profile-owner (MDM) apps; the legacy secure key is
+ * not a live store, and the Settings app writes through binder calls
+ * into the connectivity service. A regular app cannot assert
+ * always-on for another app. Any design claiming otherwise is lying.
  *
- *  - ASSERT: Android's Always-on VPN is a secure setting
- *    (Settings.Secure "always_on_vpn_app") — the same key the Settings
- *    UI writes. This app already holds WRITE_SECURE_SETTINGS (the ADB
- *    self-heal grant), so each cycle it asserts that key for Tailscale
- *    (com.tailscale.ipn) and clears lockdown if it is ever set for it
- *    (lockdown would take ALL traffic down with the VPN — never wanted
- *    here). With the key set, the OS itself relaunches Tailscale's
- *    VpnService whenever it dies; no watchdog polling is needed.
- *  - DETECT: the tailnet is up iff some up, non-loopback interface
- *    holds an address in 100.64.0.0/10 (Tailscale's CGNAT range).
- *    Tailscale's battery-exemption state is read via
- *    PowerManager.isIgnoringBatteryOptimizations (any package may be
- *    queried; the exemption itself can only be GRANTED by the user or
- *    by shell — the guardian detects and reports, never grants).
- *  - REPORT: every Worker report carries a "tailscale" object, so
- *    Muse sees tailnet presence directly instead of inferring it
- *    from failed connects minutes later.
- *  - FALLBACK: if the interface stays down for 10+ minutes despite
- *    the always-on assertion, the guardian tries launching Tailscale's
- *    main activity (best effort — background activity starts are
- *    restricted; a foreground-service context plus a user-visible app
- *    makes it worth the attempt), throttled to once per 30 minutes.
+ * So the guardian IS the reviver instead:
+ *  - DETECT (unchanged): the tailnet is up iff some up, non-loopback
+ *    interface holds an address in 100.64.0.0/10. Checked every
+ *    bridge cycle (60 s). Battery-exemption state read via
+ *    PowerManager (detect/report only — granting is user/shell only).
+ *  - REVIVE: on the first down cycle of an episode, immediately try
+ *    launching Tailscale's main activity — Tailscale reconnects on
+ *    launch when its own state says it should be connected, which is
+ *    exactly the killed-by-the-system case. Retries with backoff
+ *    (2 min, 5 min, 15 min, then every 30 min) while the episode
+ *    lasts. Background activity starts are restricted, so every
+ *    attempt is best-effort and logged, success or failure.
+ *  - ESCALATE: if an episode passes 5 minutes despite launch
+ *    attempts, post ONE tappable notification per episode —
+ *    "Tailscale is down — tap to reopen" — whose tap launches
+ *    Tailscale (a user tap is never background-restricted).
+ *  - REPORT: every Worker report carries the tailscale object,
+ *    including down-episode count and the last recovery time, so
+ *    Muse sees presence and recovery directly.
+ *
+ * The OS-level always-on toggle remains valuable and is set by the
+ * user in Settings (done 2026-11-03); the guardian complements it —
+ * it never claims to control it.
  */
 public final class TailscaleGuard {
     public static final String PKG = "com.tailscale.ipn";
-    private static final String KEY_ALWAYS_ON = "always_on_vpn_app";
-    private static final String KEY_LOCKDOWN = "always_on_vpn_lockdown";
-    private static final long DOWN_BEFORE_LAUNCH_MS = 10 * 60 * 1000;
-    private static final long LAUNCH_THROTTLE_MS = 30 * 60 * 1000;
+    private static final String CHANNEL = "tailscale-guard";
+    private static final int NOTIF_ID = 7;
+    private static final long ESCALATE_AFTER_MS = 5 * 60 * 1000;
+    private static final long[] BACKOFF_MS = {
+            0, 2 * 60 * 1000, 5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000};
 
     private TailscaleGuard() {}
 
@@ -92,77 +100,102 @@ public final class TailscaleGuard {
         }
     }
 
-    public static boolean alwaysOnAsserted(Context ctx) {
-        try {
-            return PKG.equals(Settings.Secure.getString(
-                    ctx.getContentResolver(), KEY_ALWAYS_ON));
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
     /** Called once per bridge cycle. */
     public static void tick(Context ctx) {
         if (!installed(ctx)) return;
-        boolean granted = ctx.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS)
-                == PackageManager.PERMISSION_GRANTED;
-
-        // ASSERT: make the OS the reviver.
-        if (granted && !alwaysOnAsserted(ctx)) {
-            try {
-                Settings.Secure.putString(ctx.getContentResolver(), KEY_ALWAYS_ON, PKG);
-                BridgeLog.log(ctx, "TS_GUARD", "asserted always_on_vpn_app="
-                        + PKG + " (OS now relaunches Tailscale when it dies)");
-            } catch (Exception e) {
-                BridgeLog.log(ctx, "TS_GUARD", "always-on assert failed: "
-                        + e.getClass().getSimpleName());
-            }
-        }
-        if (granted && alwaysOnAsserted(ctx)) {
-            try {
-                String lockdown = Settings.Secure.getString(
-                        ctx.getContentResolver(), KEY_LOCKDOWN);
-                if ("1".equals(lockdown)) {
-                    Settings.Secure.putString(ctx.getContentResolver(), KEY_LOCKDOWN, "0");
-                    BridgeLog.log(ctx, "TS_GUARD",
-                            "cleared always_on_vpn_lockdown (lockdown would take all "
-                            + "traffic down with the VPN)");
-                }
-            } catch (Exception ignored) {}
-        }
-
-        // DETECT + FALLBACK: track the down window; try a launch when
-        // the assertion alone has not brought the interface back.
         String ip = tailnetIp(ctx);
         long now = System.currentTimeMillis();
+        long since = Store.getLong(ctx, Store.K_TS_DOWN_SINCE, 0);
+
         if (!ip.isEmpty()) {
-            if (Store.getLong(ctx, Store.K_TS_DOWN_SINCE, 0) != 0) {
-                BridgeLog.log(ctx, "TS_GUARD", "tailnet is back: " + ip);
+            if (since != 0) {
+                long downFor = now - since;
+                Store.put(ctx, Store.K_TS_DOWN_SINCE, 0L);
+                Store.put(ctx, Store.K_TS_LAST_RECOVERED, now);
+                Store.put(ctx, Store.K_TS_LAUNCH_COUNT, 0L);
+                Store.put(ctx, Store.K_TS_NOTIFIED, false);
+                BridgeLog.log(ctx, "TS_GUARD", "tailnet recovered: " + ip
+                        + " (was down " + (downFor / 1000) + "s)");
+                NotificationManager nm = (NotificationManager)
+                        ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+                if (nm != null) nm.cancel(NOTIF_ID);
             }
-            Store.put(ctx, Store.K_TS_DOWN_SINCE, 0L);
-        } else {
-            long since = Store.getLong(ctx, Store.K_TS_DOWN_SINCE, 0);
-            if (since == 0) {
-                Store.put(ctx, Store.K_TS_DOWN_SINCE, now);
-                BridgeLog.log(ctx, "TS_GUARD",
-                        "tailnet interface is DOWN (no 100.64/10 address)");
-            } else if (now - since > DOWN_BEFORE_LAUNCH_MS
-                    && now - Store.getLong(ctx, Store.K_TS_LAST_LAUNCH, 0) > LAUNCH_THROTTLE_MS) {
-                Store.put(ctx, Store.K_TS_LAST_LAUNCH, now);
-                try {
-                    Intent launch = ctx.getPackageManager().getLaunchIntentForPackage(PKG);
-                    if (launch != null) {
-                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        ctx.startActivity(launch);
-                        BridgeLog.log(ctx, "TS_GUARD",
-                                "tailnet down >10 min despite always-on; launched "
-                                + "Tailscale UI as a fallback");
-                    }
-                } catch (Exception e) {
-                    BridgeLog.log(ctx, "TS_GUARD", "fallback launch failed: "
-                            + e.getClass().getSimpleName());
-                }
+            return;
+        }
+
+        // Down.
+        if (since == 0) {
+            since = now;
+            Store.put(ctx, Store.K_TS_DOWN_SINCE, now);
+            Store.put(ctx, Store.K_TS_DOWN_COUNT,
+                    Store.getLong(ctx, Store.K_TS_DOWN_COUNT, 0) + 1);
+            Store.put(ctx, Store.K_TS_LAUNCH_COUNT, 0L);
+            Store.put(ctx, Store.K_TS_NOTIFIED, false);
+            BridgeLog.log(ctx, "TS_GUARD",
+                    "tailnet interface is DOWN (no 100.64/10 address)");
+        }
+
+        // Revive attempts on the backoff ladder.
+        long attempts = Store.getLong(ctx, Store.K_TS_LAUNCH_COUNT, 0);
+        long lastLaunch = Store.getLong(ctx, Store.K_TS_LAST_LAUNCH, 0);
+        long wait = BACKOFF_MS[(int) Math.min(attempts, BACKOFF_MS.length - 1)];
+        if (now - since >= wait && now - lastLaunch >= wait) {
+            Store.put(ctx, Store.K_TS_LAST_LAUNCH, now);
+            Store.put(ctx, Store.K_TS_LAUNCH_COUNT, attempts + 1);
+            tryLaunch(ctx, "attempt " + (attempts + 1));
+        }
+
+        // One tappable escalation per episode.
+        if (now - since > ESCALATE_AFTER_MS
+                && !Store.getBool(ctx, Store.K_TS_NOTIFIED, false)) {
+            Store.put(ctx, Store.K_TS_NOTIFIED, true);
+            postDownNotification(ctx);
+        }
+    }
+
+    private static void tryLaunch(Context ctx, String why) {
+        try {
+            Intent launch = ctx.getPackageManager().getLaunchIntentForPackage(PKG);
+            if (launch == null) {
+                BridgeLog.log(ctx, "TS_GUARD", "revive " + why
+                        + ": no launch intent for Tailscale");
+                return;
             }
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(launch);
+            BridgeLog.log(ctx, "TS_GUARD", "revive " + why
+                    + ": launched Tailscale UI");
+        } catch (Exception e) {
+            BridgeLog.log(ctx, "TS_GUARD", "revive " + why + " failed: "
+                    + e.getClass().getSimpleName());
+        }
+    }
+
+    private static void postDownNotification(Context ctx) {
+        try {
+            NotificationManager nm = (NotificationManager)
+                    ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            nm.createNotificationChannel(new NotificationChannel(
+                    CHANNEL, "Tailscale guard", NotificationManager.IMPORTANCE_HIGH));
+            Intent launch = ctx.getPackageManager().getLaunchIntentForPackage(PKG);
+            if (launch == null) return;
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            PendingIntent pi = PendingIntent.getActivity(ctx, NOTIF_ID, launch,
+                    PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            Notification n = new Notification.Builder(ctx, CHANNEL)
+                    .setSmallIcon(android.R.drawable.stat_notify_error)
+                    .setContentTitle("Tailscale is down")
+                    .setContentText("Tap to reopen Tailscale — Muse's phone lane is offline.")
+                    .setContentIntent(pi)
+                    .setAutoCancel(true)
+                    .build();
+            nm.notify(NOTIF_ID, n);
+            BridgeLog.log(ctx, "TS_GUARD",
+                    "escalated: posted tappable Tailscale-down notification");
+        } catch (Exception e) {
+            BridgeLog.log(ctx, "TS_GUARD", "escalation failed: "
+                    + e.getClass().getSimpleName());
         }
     }
 
@@ -175,8 +208,10 @@ public final class TailscaleGuard {
             o.put("up", !ip.isEmpty());
             o.put("ip", ip);
             o.put("battery_exempt", inst && batteryExempt(ctx));
-            o.put("always_on", inst && alwaysOnAsserted(ctx));
+            o.put("reviver_armed", inst);
             o.put("down_since", Store.getLong(ctx, Store.K_TS_DOWN_SINCE, 0));
+            o.put("down_count", Store.getLong(ctx, Store.K_TS_DOWN_COUNT, 0));
+            o.put("last_recovered_ms", Store.getLong(ctx, Store.K_TS_LAST_RECOVERED, 0));
         } catch (Exception ignored) {}
         return o;
     }
