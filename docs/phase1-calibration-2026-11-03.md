@@ -35,6 +35,13 @@ against the resolved observed mode, not field 1 alone. Until then, shadow
 verdicts of "drift" against desired=home with this signature are expected
 and are NOT real drift.
 
+**RESOLVED in v1.2.0 (2026-11-03, same night):** implemented exactly as
+specified in `Reconciler.resolveObservedMode`, with field 1 preserved in
+reports as `observed.raw_mode`. Live-verified minutes after install: a
+fresh dump (raw field 1 "None", running "Auto rotate, At Home, or 2
+others") resolved to observed.mode "Home" → verdict **in_sync**,
+**ack true** — the bridge's first verified ack.
+
 ## ADB endpoint note
 
 mDNS discovery reports the Wi-Fi LAN address (e.g. 192.168.1.153:38865);

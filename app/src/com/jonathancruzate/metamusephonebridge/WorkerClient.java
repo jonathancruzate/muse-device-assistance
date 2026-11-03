@@ -93,7 +93,9 @@ public final class WorkerClient {
             body.put("ts", System.currentTimeMillis());
 
             JSONObject observed = new JSONObject();
-            observed.put("mode", Store.get(ctx, Store.K_GT_MODE, ""));
+            observed.put("mode", Reconciler.resolveObservedMode(
+                    Store.get(ctx, Store.K_GT_MODE, ""), Store.get(ctx, Store.K_GT_RUNNING, "")));
+            observed.put("raw_mode", Store.get(ctx, Store.K_GT_MODE, ""));
             observed.put("running", Store.get(ctx, Store.K_GT_RUNNING, ""));
             observed.put("at", Store.getLong(ctx, Store.K_GT_AT, 0));
             observed.put("parse_ok", Store.getBool(ctx, Store.K_GT_PARSE_OK, false));

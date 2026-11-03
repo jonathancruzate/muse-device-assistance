@@ -116,7 +116,8 @@ public class BridgeService extends Service {
     }
 
     private void updateNotification(Reconciler.Verdict v) {
-        String mode = Store.get(this, Store.K_GT_MODE, "?");
+        String mode = Reconciler.resolveObservedMode(
+                Store.get(this, Store.K_GT_MODE, "?"), Store.get(this, Store.K_GT_RUNNING, ""));
         String desired = Store.get(this, Store.K_DESIRED_MODE, "?");
         String text = "Mode: " + mode + " · Desired: " + desired + " · " + v.state
                 + " (shadow — observing only)";

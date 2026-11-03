@@ -41,6 +41,34 @@ public final class Reconciler {
         }
     }
 
+    /** Canonical Samsung mode name: the running list renders the Home mode
+     *  as "At Home" while field 1 renders it "Home". */
+    public static String canonicalMode(String mode) {
+        if (mode == null) return "";
+        String m = mode.trim();
+        if (m.equalsIgnoreCase("at home")) return "Home";
+        return m;
+    }
+
+    /** The observed mode the verdicts and reports speak in. Field 1 is the
+     *  authority when it names a real Mode. On this phone the house modes
+     *  are largely routine-held: field 1 reads "None" while the running
+     *  list (field 2) names the engaged mode's routine ("At Home",
+     *  "Switch Sleep mode") — the incumbent mode-sync system treats that
+     *  signature as the engaged mode (verified aligned 2026-11-02), so
+     *  resolve it the same way. The Away latch never resolves a mode:
+     *  a latch is not an engagement. (Phase 1 calibration, 2026-11-03.) */
+    public static String resolveObservedMode(String gtMode, String gtRunning) {
+        String mode = canonicalMode(gtMode);
+        if (!mode.isEmpty() && !"none".equalsIgnoreCase(mode)) return mode;
+        if (gtRunning == null) return mode;
+        String low = gtRunning.toLowerCase();
+        if (low.contains("at home") || low.contains("switch home")) return "Home";
+        if (low.contains("sleep")) return "Sleep";
+        if (low.contains("morning")) return "Morning";
+        return mode;
+    }
+
     public static Verdict evaluate(Context ctx) {
         Verdict v = new Verdict();
         String desired = Store.get(ctx, Store.K_DESIRED_MODE, "");
@@ -68,6 +96,7 @@ public final class Reconciler {
 
         boolean awayLatched = gtRunning.toLowerCase().contains("switch away");
         String target = samsungModeFor(desired);
+        String effMode = resolveObservedMode(gtMode, gtRunning);
 
         if ("away".equals(desired.toLowerCase())) {
             if (awayLatched) {
@@ -81,7 +110,7 @@ public final class Reconciler {
         }
 
         // Non-away target.
-        if (target != null && target.equalsIgnoreCase(gtMode)) {
+        if (target != null && target.equalsIgnoreCase(effMode)) {
             if (awayLatched) {
                 v.state = "drift";
                 v.plan = "mode already " + target + " but the Away latch is also running: "
@@ -96,9 +125,9 @@ public final class Reconciler {
         // Drifted-latch case: a mode reads active but its switch routine is
         // not in the running list.
         StringBuilder plan = new StringBuilder();
-        if (!"none".equalsIgnoreCase(gtMode) && !gtMode.isEmpty()
-                && !runningNamesMode(gtRunning, gtMode)) {
-            plan.append("drifted latch: ").append(gtMode)
+        if (!"none".equalsIgnoreCase(effMode) && !effMode.isEmpty()
+                && !runningNamesMode(gtRunning, effMode)) {
+            plan.append("drifted latch: ").append(effMode)
                 .append(" reads active but its switch routine is not running — ")
                 .append("toggle its switch ON then OFF to clear it; ");
         }

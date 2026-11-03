@@ -154,8 +154,9 @@ phone-side steps. An on-device app owns all three:
   `adb_port` from `adb-keepalive.state.json`) is to be repointed at the
   latest reported endpoint — tracked with the `/phone-bridge/report`
   Worker endpoint work.
-- v1.2 (designed, not built): the full local shell — the app pairs once
-  in-app (LADB pattern) and holds a loopback ADB connection, pulling
+- The full local shell (designed, not built; renumbered to v1.3 when
+  v1.2.0 shipped the calibration fix below): the app pairs once in-app
+  (LADB pattern) and holds a loopback ADB connection, pulling
   allowlisted shell commands down the Worker channel.
 
 ### Build record — v1.1.0 (2026-11-03)
@@ -168,3 +169,35 @@ phone-side steps. An on-device app owns all three:
   build guards — 18 app classes in the root dex, zero `androidx`;
   `_adb-tls-connect` present in dex strings; no secrets, no MacroDroid
   relay strings.
+
+## v1.2.0 — Resolved observed mode (Phase 1 calibration, 2026-11-03)
+
+The first live shadow capture (2026-11-03) proved the ground-truth lane
+end to end — and exposed a vocabulary gap: with desired=home, the dump's
+field 1 read "None" while field 2's running list named "At Home". The
+incumbent mode-sync system treats that signature as the engaged home
+mode (verified aligned 2026-11-02): on this phone the house modes are
+largely routine-held, so the mode name lives in the running list while
+field 1 stays "None". The v1.1.0 reconciler scored it "drift".
+
+- **`Reconciler.resolveObservedMode`** is now the single resolution
+  layer for verdicts, the status notification, and Worker reports:
+  field 1 wins when it names a real Mode ("At Home" canonicalizes to
+  "Home"); when field 1 is "None", the running list resolves the mode
+  ("At Home"/"Switch Home" → Home, "Sleep" → Sleep, "Morning" →
+  Morning). The Away latch deliberately never resolves a mode — a
+  latch is not an engagement.
+- Reports now carry `observed.raw_mode` alongside the resolved
+  `observed.mode`, so field 1 is never hidden by the resolution.
+- Full evidence: `docs/phase1-calibration-2026-11-03.md`.
+
+### Build record — v1.2.0 (2026-11-03)
+
+- APK: `app/Muse-Phone-Bridge-1.2.0.apk`, 140,533 bytes,
+  SHA-256 `f7731dbf0a4eba3fe1b2ca49e8a3a745daa71f41736d4dc3b77e8b730659cf01`
+- Same signing cert as v1.0.0/v1.1.0 (`4dcb45fa…`) — installs over
+  v1.1.0 in place (done over ADB, dumpsys-verified versionCode 3).
+- **Live verification:** after a fresh `status_full` dump, the bridge
+  reported observed.mode "Home" (raw_mode "None", running "Auto rotate,
+  At Home, or 2 others"), verdict **in_sync**, **ack true** — the first
+  verified ack the bridge has produced.
