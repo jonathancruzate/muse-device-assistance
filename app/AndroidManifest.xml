@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.jonathancruzate.metamusephonebridge">
+    package="com.jonathancruzate.metamusedeviceassistance">
 
     <!-- Muse Phone Bridge: the phone-side control plane that complements
          MacroDroid (investigation 2026-11-01, report
@@ -30,12 +30,12 @@
     <!-- ADB self-heal: re-enable wireless debugging when it drops. NOT
          granted at install for a sideloaded app — granted once, while ADB
          is up, via: adb shell pm grant
-         com.jonathancruzate.metamusephonebridge
+         com.jonathancruzate.metamusedeviceassistance
          android.permission.WRITE_SECURE_SETTINGS -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
     <application
-        android:label="Muse Phone Bridge"
+        android:label="Muse Device Assistance"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="false"
@@ -52,7 +52,7 @@
              notifications on-device (the same dump text the server-side
              system already treats as ground truth). -->
         <service android:name=".GroundTruthListener"
-            android:label="Muse Phone Bridge ground truth"
+            android:label="Muse Device Assistance ground truth"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
             android:exported="true">
             <intent-filter>

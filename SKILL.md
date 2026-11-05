@@ -6,8 +6,8 @@ truth, the verification, and the reconciliation logic Samsung's gated
 mode surfaces leave to everyone else. Built from the 2026-11-01
 investigation *"Custom app vs MacroDroid as the phone-control plane"*.
 Project: `~/workspace/muse-device-assistance/` (repo
-`jonathancruzate/muse-phone-bridge` until Jonathan's GitHub rename
-step lands, then `jonathancruzate/muse-device-assistance`; the GitHub
+`jonathancruzate/muse-device-assistance` — renamed on GitHub
+2026-11-04, the old `muse-phone-bridge` URL redirects; the GitHub
 snapshot source is `github-export/` inside the project).
 
 **Renamed 2026-11-03 (Jonathan's order, live voice call): Muse Phone
@@ -19,19 +19,20 @@ and the app is being extended from bridge access to full device
 control (roadmap in the connector doc,
 `~/workspace/custom-connectors/custom.device-assistance/CONNECTOR.md`;
 execution sequence in `RENAME-PLAN.md` at the project root). What has
-**not** changed yet, deliberately: the installed app's label ("Muse
-Phone Bridge"), its Android package
-(`com.jonathancruzate.metamusephonebridge`), and the wire names
-(Worker endpoint `/phone-bridge/report`, KV key `phonebridge:report`,
-report `device:"phone-bridge"`). A package rename is a new app
-identity — fresh install, grants and prefs do not carry — so it ships
-only as the staged, verified build in the rename plan (target:
-label "Muse Device Assistance", package
-`com.jonathancruzate.metamusedeviceassistance`, same naming convention
-as the current package), never as a silent swap under the live
-lanes. Until that build lands, on-device
-strings, UI labels, and prefs in this skill still say "Phone Bridge"
-because that is what the installed app says.
+**not** changed, deliberately: the wire names (Worker endpoint
+`/phone-bridge/report`, KV key `phonebridge:report`, report
+`device:"phone-bridge"`) — a live contract with the mode-sync
+Worker, not branding. The label + package rename itself was
+**executed 2026-11-05** (evidence: `RENAME-PLAN.md` step B,
+`RENAME-BUILD-PLAN.md`): the renamed build (label "Muse Device
+Assistance", package
+`com.jonathancruzate.metamusedeviceassistance`) was installed
+alongside the old package, re-granted, verified reporting with
+fresh `parse_ok=true` ground truth, and only then was the old
+package uninstalled. The canonical sources now carry the new
+package throughout; the wire names above are unchanged, as are the
+prefs name, Store keys, log filename, and notification channel
+IDs.
 
 This skill ships with the app (Jonathan's standing rule, 2026-11-03:
 every APK we build carries a skill teaching Muse how to interact with
@@ -42,15 +43,20 @@ are the same document — update both in the same handling, always.
 
 ## Identity and version source of truth
 
-- **Package:** `com.jonathancruzate.metamusephonebridge`
-  (label "Muse Phone Bridge" — the installed app's identity is
-  unchanged by the 2026-11-03 project rename; the label + package
-  rename is the staged build in `RENAME-PLAN.md`, not yet shipped)
+- **Package:** `com.jonathancruzate.metamusedeviceassistance`
+  (label "Muse Device Assistance" — the label + package rename was
+  executed 2026-11-05; the old package
+  `com.jonathancruzate.metamusephonebridge` / label "Muse Phone
+  Bridge" was uninstalled after the verified cutover)
 - **Version source of truth:** `app/build.sh` — `VERSION_NAME` /
   `VERSION_CODE` in that script, backed by the build records in
   `github-export/README.md`. At this writing: **v1.3.2, versionCode 6**
-  (APK `app/Muse-Phone-Bridge-1.3.2.apk`, SHA-256
-  `1f2055ca02987af63cfea50d9610200223b2ec73d3ba4a7601a2d9ea7cd45cae`).
+  (APK `app/Muse-Device-Assistance-1.3.2.apk`, SHA-256
+  `3b2adc07d64eb000369f316bfa6f713a376e49c357109aba842166d82ab06166`,
+  rebuilt from the renamed canonical tree 2026-11-05. The retired
+  `app/Muse-Phone-Bridge-1.3.2.apk`, SHA-256
+  `1f2055ca02987af63cfea50d9610200223b2ec73d3ba4a7601a2d9ea7cd45cae`,
+  is kept alongside as the rollback build.)
   The project-root `README.md` is **stale** (it stops at v1.1.0) — never
   cite it for current version or capability; `github-export/README.md`
   and `build.sh` govern.
@@ -202,7 +208,7 @@ every recovery needed manual phone-side steps.
   re-enables wireless debugging (`Settings.Global adb_wifi_enabled`)
   whenever a bridge cycle finds it off. The grant is one-time, done
   while ADB is up:
-  `adb shell pm grant com.jonathancruzate.metamusephonebridge android.permission.WRITE_SECURE_SETTINGS`.
+  `adb shell pm grant com.jonathancruzate.metamusedeviceassistance android.permission.WRITE_SECURE_SETTINGS`.
   Heals are logged (`ADB_HEAL`) and reported. A UI checkbox can disarm
   self-heal (**default ON**, separate from the Phase 2 arm switch).
   Without the grant, the app logs the need at most every 6 hours and
@@ -296,7 +302,7 @@ notification-listener access, and unrestricted battery (Samsung Device
 Care is the known killer; parity with MacroDroid).
 
 **On-device setup (Jonathan / UI, from the README).** Install → open
-**Muse Phone Bridge** → **Run Phase 0 probe** → **Grant notification
+**Muse Device Assistance** → **Run Phase 0 probe** → **Grant notification
 access** → **Allow unrestricted battery** → enter the Worker base URL
 and mode-state secret on-device → **Save worker settings** → **Start
 bridge**. Useful UI controls Muse may direct Jonathan to, or read
@@ -396,6 +402,39 @@ connectors registered against it — Galaxy Buds first (namespace
 `buds`, its own plugin and connector), more devices later the same
 way. The core never interprets device semantics.
 
+### Optional feature (Jonathan's proposal, 2026-11-03 — not built): contextual voice-mode self-activation
+
+An optional module for this app: the **accessibility trick from Muse
+Voice Mode Shortcut / Muse for Android Auto**, folded in as a
+Device Assistance capability. The app's accessibility service opens
+Muse via `ACTION_ASSIST` (`com.facebook.aura`) — `hatch://voice` is
+TrustedCaller-gated to Meta apps — and taps Muse's own voice button
+(REA view-id candidates incl. `hatch_voice_button`, then exact
+text/desc labels), toggling voice mode on/off with the state
+persisted on-device. Purpose: Muse can turn voice mode on **itself,
+contextually, to speak** — when Jonathan is walking, driving, or
+otherwise hands-busy and a spoken exchange serves him better than
+text — instead of voice mode only ever starting from his side-button
+long-press or the widget.
+
+- **Optional and off by default.** The module ships disabled; Jonathan
+  enables it (and its accessibility service) in the app. Disabled
+  means the capability does not exist, not that it is merely unused.
+- **Ask-first rule (Jonathan's instruction, 2026-11-03 — this skill
+  is where Muse is told):** before Muse self-activates voice mode
+  in a context, Muse asks Jonathan first, briefly and in the moment,
+  whether to use it — unless he has pre-approved that context class
+  (a standing approval he gives is recorded here). One ask per
+  context; a no means text-only for that context and no re-asking.
+  Self-activation never extends an exchange he has ended, never
+  overrides a "stop" / "I'm good for now," and never carries the
+  hang-up-threat phrasing ("the call will end soon") — the bounded-
+  exchange repair rules bind this feature first.
+- The toggle mechanics, failure modes, and verification are the Voice
+  Mode Shortcut's (`local-muse-voice-mode-shortcut` skill): a fire is
+  only real when the voice session observably starts/stops, never on
+  the tap alone.
+
 ## Hard rules
 
 - **Never arm Phase 2, link a routine, or test-fire from Muse's
@@ -423,10 +462,9 @@ way. The core never interprets device semantics.
   whole ADB surface.
 - Every build/change upstreams in the same handling: source push to
   the project's GitHub repo (via the `github-export/` snapshot) — the
-  repo is `jonathancruzate/muse-phone-bridge` until Jonathan's GitHub
-  rename step lands and `jonathancruzate/muse-device-assistance` after
-  it; check the snapshot record's `repo` field for which is live
-  before pushing — a GitHub Release where the project ships one (asset SHA
+  repo is `jonathancruzate/muse-device-assistance` (renamed on
+  GitHub 2026-11-04; the old `muse-phone-bridge` URL redirects);
+  check the snapshot record's `repo` field before pushing — a GitHub Release where the project ships one (asset SHA
   verified against the build), the findings/runbook doc, and this
   skill if the procedure changed — both copies, in the same handling.
 
@@ -464,4 +502,4 @@ way. The core never interprets device semantics.
   `AdbBridge` (discovery/self-heal), `TailscaleGuard` (reviver),
   `Actuation` + `RoutineFirer` (Phase 2 gate/firing), `Store`
   (all prefs keys), `Probe` (Phase 0), `BridgeLog` (on-device log) —
-  all under `app/src/com/jonathancruzate/metamusephonebridge/`.
+  all under `app/src/com/jonathancruzate/metamusedeviceassistance/`.

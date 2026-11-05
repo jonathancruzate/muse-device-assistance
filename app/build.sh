@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build Muse Phone Bridge (framework-only Android app, NO AndroidX — the
+# Build Muse Device Assistance (framework-only Android app, NO AndroidX — the
 # raw build therefore cannot hit the KMP empty-jar trap documented in
 # AGENTS.md; the guards below enforce that: the build FAILS if the dex
 # references any androidx class or if any app class is missing from it).
@@ -17,7 +17,7 @@ KS="keystore/musephonebridge.keystore"
 KS_PASS_FILE="keystore/keystore-password.txt"
 VERSION_CODE=6
 VERSION_NAME="1.3.2"
-PKG_PATH="com/jonathancruzate/metamusephonebridge"
+PKG_PATH="com/jonathancruzate/metamusedeviceassistance"
 
 rm -rf build
 mkdir -p build/gen build/classes build/dex keystore
@@ -79,9 +79,9 @@ cp build/unsigned.apk build/staged.apk
 
 echo "== sign =="
 "$BT/apksigner" sign --ks "$KS" --ks-pass "pass:$PASS" --key-pass "pass:$PASS" \
-  --out "Muse-Phone-Bridge-$VERSION_NAME.apk" build/aligned.apk
+  --out "Muse-Device-Assistance-$VERSION_NAME.apk" build/aligned.apk
 
 echo "== verify =="
-"$BT/apksigner" verify --print-certs "Muse-Phone-Bridge-$VERSION_NAME.apk"
-ls -l "Muse-Phone-Bridge-$VERSION_NAME.apk"
-sha256sum "Muse-Phone-Bridge-$VERSION_NAME.apk"
+"$BT/apksigner" verify --print-certs "Muse-Device-Assistance-$VERSION_NAME.apk"
+ls -l "Muse-Device-Assistance-$VERSION_NAME.apk"
+sha256sum "Muse-Device-Assistance-$VERSION_NAME.apk"

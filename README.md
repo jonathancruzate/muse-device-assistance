@@ -1,13 +1,16 @@
-# Muse Phone Bridge
+# Muse Device Assistance
 
 > **Project renamed 2026-11-03 (Jonathan's order): Muse Phone Bridge
-> -> Muse Device Assistance.** Canonical local home is now
+> -> Muse Device Assistance.** Canonical local home is
 > `~/workspace/muse-device-assistance/`; the companion skill is
-> `local-muse-device-assistance`. This repo keeps the name
-> `muse-phone-bridge` until the owner's GitHub rename step lands.
-> The installed app's label and package are unchanged (the APK
-> rename is a staged build — see `RENAME-PLAN.md` in the project).
-> The build records below keep the name they were written under.
+> `local-muse-device-assistance`. This repo was renamed on GitHub
+> 2026-11-04 to `muse-device-assistance` (the old URL redirects).
+> The installed app's label and package rename was **executed
+> 2026-11-05**: the app is now label "Muse Device Assistance",
+> package `com.jonathancruzate.metamusedeviceassistance` — see the
+> final build record below and `RENAME-PLAN.md` / 
+> `RENAME-BUILD-PLAN.md` in this repo. The build records below keep
+> the name they were written under.
 
 
 The phone-side control plane for Jonathan's Galaxy S24+ mode-sync system —
@@ -309,3 +312,41 @@ complementary and user-owned. Full record:
   new shape with `reviver_armed=true`, `up=true`,
   `battery_exempt=true`, verdict **in_sync**. The off/on episode test
   was pending at snapshot time.
+
+## v1.3.2 (renamed) — Muse Device Assistance package rename (2026-11-05)
+
+Pure identity rename of the v1.3.2 build — no functional change, no
+version bump. Label "Muse Phone Bridge" -> "Muse Device
+Assistance"; package `com.jonathancruzate.metamusephonebridge` ->
+`com.jonathancruzate.metamusedeviceassistance` (manifest, source
+package path, `build.sh` `PKG_PATH` + output name). The wire contract
+is deliberately unchanged: Worker base URL, `GET /mode-state`,
+`POST /phone-bridge/report`, KV key `phonebridge:report`, report
+`device:"phone-bridge"`, WorkerClient User-Agent, prefs name
+`bridge`, Store keys, log filename `bridge-log.txt`, and the
+notification channel IDs are all exactly as v1.3.2 shipped them.
+
+### Build record — v1.3.2 renamed (2026-11-05)
+
+- APK: `app/Muse-Device-Assistance-1.3.2.apk`, 148,725 bytes,
+  SHA-256 `3b2adc07d64eb000369f316bfa6f713a376e49c357109aba842166d82ab06166`
+  (rebuilt from the renamed canonical tree; an identical-identity
+  prep build from the isolated rename copy, SHA-256
+  `f0ac1616ab0c12085608a7efaf5f146c6529c7f01f03723fb630c726e2ed681c`,
+  is the artifact that was installed on the phone).
+- Same signing cert (`4dcb45fa...`, CN=Muse Phone Bridge — the DN
+  lives in the unchanged keystore, local only, never committed).
+- Verified: apksigner cert read-back; aapt2 badging (package
+  `com.jonathancruzate.metamusedeviceassistance`, versionCode 6,
+  versionName 1.3.2, label "Muse Device Assistance", minSdk 29,
+  targetSdk 35, permission set identical to v1.3.2); build guards —
+  23 app classes defined in the dex, zero `androidx` references.
+- Swap executed 2026-11-05: installed alongside the old package,
+  re-grants applied and read back (notification listener,
+  `WRITE_SECURE_SETTINGS`, deviceidle whitelist, `POST_NOTIFICATIONS`,
+  `NEARBY_WIFI_DEVICES`), Worker settings re-entered on-device,
+  bridge started, fresh reports with `parse_ok=true` ground truth
+  verified, alarm lanes verified, then the old package was
+  uninstalled and the new app kept reporting. The retired
+  `Muse-Phone-Bridge-1.3.2.apk` is kept locally as the rollback
+  build.
