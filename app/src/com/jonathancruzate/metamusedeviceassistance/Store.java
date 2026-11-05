@@ -60,6 +60,19 @@ public final class Store {
     public static final String K_ACT_FIRED_SEQ = "act_fired_seq";   // desired seq already fired for
     public static final String K_ACT_LAST_LOG = "act_last_log";     // throttle for repeated actuation logs
 
+    // Loopback shell bridge (v1.4) — in-app pairing with the phone's own
+    // wireless debugging; allowlisted commands pulled from the Worker.
+    // The RSA key + cert live in app-private FILES (LoopbackAdb), never
+    // in prefs; only state flags live here.
+    public static final String K_SHELL_PAIRED = "shell_paired";           // pairing completed at least once
+    public static final String K_SHELL_SELF_TEST_OK = "shell_self_test_ok"; // battery template passed over loopback
+    public static final String K_SHELL_ON = "shell_on";                   // UI switch: executor armed (default false; auto-set true when the self-test first passes)
+    public static final String K_SHELL_LAST_ID = "shell_last_id";
+    public static final String K_SHELL_LAST_TEMPLATE = "shell_last_template";
+    public static final String K_SHELL_LAST_OK = "shell_last_ok";
+    public static final String K_SHELL_LAST_MS = "shell_last_ms";
+    public static final String K_SHELL_LAST_AT = "shell_last_at";
+
     // Tailscale guardian (v1.3.1 detection; v1.3.2 reviver)
     public static final String K_TS_DOWN_SINCE = "ts_down_since";   // epoch ms tailnet first seen down (0 = up)
     public static final String K_TS_LAST_LAUNCH = "ts_last_launch"; // epoch ms of last revive launch attempt

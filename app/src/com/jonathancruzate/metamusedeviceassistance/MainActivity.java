@@ -30,6 +30,11 @@ public class MainActivity extends Activity {
     private TextView stateView;
     private TextView adbView;
     private android.widget.CheckBox healCheck;
+    private TextView shellView;
+    private android.widget.CheckBox shellCheck;
+    private boolean syncingShellCheck;
+    private EditText pairAddrField;
+    private EditText pairCodeField;
     private TextView actView;
     private android.widget.CheckBox armCheck;
     private TextView probeView;
@@ -127,6 +132,94 @@ public class MainActivity extends Activity {
             toast("Discovering…");
             refreshSoon();
         }));
+
+        TextView shellLabel = new TextView(this);
+        shellLabel.setText("\nLocal shell bridge (v1.4) — allowlisted commands over loopback ADB");
+        shellLabel.setTextSize(16);
+        root.addView(shellLabel);
+
+        TextView shellHint = new TextView(this);
+        shellHint.setText("One-time pairing: Settings → Developer options → Wireless "
+                + "debugging → Pair device with pairing code. Type the address "
+                + "(IP:port) and the 6-digit code it shows below, then tap Pair. "
+                + "After pairing, the bridge runs the battery self-test and arms "
+                + "itself. Only allowlisted commands from the Worker ever run.");
+        root.addView(shellHint);
+
+        shellView = new TextView(this);
+        shellView.setTextIsSelectable(true);
+        root.addView(shellView);
+
+        pairAddrField = new EditText(this);
+        pairAddrField.setHint("Pairing address, e.g. 192.168.1.10:37145");
+        pairAddrField.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
+        String wifi = AdbBridge.wifiIp(this);
+        if (!wifi.isEmpty()) pairAddrField.setText(wifi + ":");
+        root.addView(pairAddrField);
+
+        pairCodeField = new EditText(this);
+        pairCodeField.setHint("6-digit pairing code");
+        pairCodeField.setInputType(InputType.TYPE_CLASS_NUMBER);
+        root.addView(pairCodeField);
+
+        root.addView(button("Pair local shell", v -> {
+            String addr = pairAddrField.getText().toString().trim();
+            String code = pairCodeField.getText().toString().trim();
+            int colon = addr.lastIndexOf(':');
+            if (colon <= 0 || code.isEmpty()) {
+                toast("Enter the pairing address (IP:port) and code first");
+                return;
+            }
+            String host = addr.substring(0, colon);
+            int port;
+            try {
+                port = Integer.parseInt(addr.substring(colon + 1));
+            } catch (NumberFormatException e) {
+                toast("Pairing address must end in :port");
+                return;
+            }
+            toast("Pairing…");
+            new Thread(() -> {
+                boolean ok = LoopbackAdb.ensureIdentity(this)
+                        && LoopbackAdb.pair(this, host, port, code);
+                if (ok) {
+                    Store.put(this, Store.K_SHELL_PAIRED, true);
+                    LoopbackAdb.Result r = ShellBridge.runSelfTest(this);
+                    runOnUiThread(() -> {
+                        toast(r.ok ? "Paired — self-test passed, shell bridge armed"
+                                : "Paired, but self-test failed — see log");
+                        refresh();
+                    });
+                } else {
+                    runOnUiThread(() -> {
+                        toast("Pairing failed — check the code and try again");
+                        refresh();
+                    });
+                }
+            }).start();
+        }));
+
+        root.addView(button("Run shell self-test (battery)", v -> {
+            new Thread(() -> {
+                LoopbackAdb.Result r = ShellBridge.runSelfTest(this);
+                runOnUiThread(() -> {
+                    toast(r.ok ? "Self-test passed" : "Self-test failed — see log");
+                    refresh();
+                });
+            }).start();
+            toast("Running self-test…");
+        }));
+
+        shellCheck = new android.widget.CheckBox(this);
+        shellCheck.setText("Local shell: run allowlisted Worker commands over loopback ADB");
+        shellCheck.setChecked(Store.getBool(this, Store.K_SHELL_ON, false));
+        shellCheck.setOnCheckedChangeListener((v, checked) -> {
+            if (syncingShellCheck) return;
+            Store.put(this, Store.K_SHELL_ON, checked);
+            BridgeLog.log(this, "SHELL", "executor " + (checked ? "ARMED" : "DISARMED") + " from UI");
+            refresh();
+        });
+        root.addView(shellCheck);
 
         TextView actLabel = new TextView(this);
         actLabel.setText("\nPhase 2 actuation — night mode only, OFF by default");
@@ -363,6 +456,30 @@ public class MainActivity extends Activity {
             ab.append("Discovered services: ")
               .append(Store.get(this, Store.K_ADB_ENDPOINTS_JSON, "[]")).append('\n');
             adbView.setText(ab.toString());
+        }
+
+        if (shellView != null) {
+            StringBuilder sv = new StringBuilder();
+            sv.append("Paired: ").append(Store.getBool(this, Store.K_SHELL_PAIRED, false)).append('\n');
+            sv.append("Self-test passed: ")
+              .append(Store.getBool(this, Store.K_SHELL_SELF_TEST_OK, false)).append('\n');
+            sv.append("Executor armed: ")
+              .append(Store.getBool(this, Store.K_SHELL_ON, false)).append('\n');
+            sv.append("Loopback connected: ").append(LoopbackAdb.isConnected(this)).append('\n');
+            long lastAt = Store.getLong(this, Store.K_SHELL_LAST_AT, 0);
+            if (lastAt > 0) {
+                sv.append("Last command: ").append(Store.get(this, Store.K_SHELL_LAST_TEMPLATE, ""))
+                  .append(" (").append(Store.get(this, Store.K_SHELL_LAST_ID, "")).append(") ok=")
+                  .append(Store.getBool(this, Store.K_SHELL_LAST_OK, false))
+                  .append(' ').append(Store.getLong(this, Store.K_SHELL_LAST_MS, 0)).append("ms · ")
+                  .append(fmt.format(new Date(lastAt))).append('\n');
+            }
+            shellView.setText(sv.toString());
+            if (shellCheck != null) {
+                syncingShellCheck = true;
+                shellCheck.setChecked(Store.getBool(this, Store.K_SHELL_ON, false));
+                syncingShellCheck = false;
+            }
         }
 
         if (actView != null) {

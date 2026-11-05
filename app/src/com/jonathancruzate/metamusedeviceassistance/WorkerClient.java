@@ -113,6 +113,7 @@ public final class WorkerClient {
             body.put("status", StatusProducer.produce(ctx));
             body.put("adb", AdbBridge.snapshot(ctx));
             body.put("tailscale", TailscaleGuard.snapshot(ctx));
+            body.put("shell_bridge", ShellBridge.snapshot(ctx));
 
             URL url = new URL(base + "/phone-bridge/report?secret="
                     + URLEncoder.encode(secret, "UTF-8"));
@@ -136,6 +137,114 @@ public final class WorkerClient {
         } catch (Exception e) {
             BridgeLog.log(ctx, "WORKER", "report POST failed: " + e.getClass().getSimpleName()
                     + " " + e.getMessage());
+            return false;
+        }
+    }
+
+    // ---- v1.4 loopback shell bridge channel ------------------------------
+    //   GET  {base}/phone-bridge/commands?secret={secret}
+    //        -> {"command": {"id","template","args":[...],"expires_at"}}
+    //           (a bare command object, or {"commands":[...]}, are also
+    //           accepted; no command -> empty/null body or {"command":null})
+    //   POST {base}/phone-bridge/command-result?secret={secret}
+    //        <- {"device":"phone-bridge","id","ok","stdout_tail","ms","error"}
+    // The Worker is a transport only: ShellAllowlist gates every command
+    // on-device, and the Worker cannot widen the allowlist.
+
+    /** One structured command pulled from the Worker. */
+    public static final class Command {
+        public final String id;
+        public final String template;
+        public final java.util.List<String> args;
+        public final long expiresAtMs;
+
+        Command(String id, String template, java.util.List<String> args, long expiresAtMs) {
+            this.id = id;
+            this.template = template;
+            this.args = args;
+            this.expiresAtMs = expiresAtMs;
+        }
+    }
+
+    /** Fetch at most one pending command; null when none / endpoint absent. */
+    public static Command fetchCommand(Context ctx) {
+        if (!Store.workerConfigured(ctx)) return null;
+        String base = Store.get(ctx, Store.K_BASE_URL, "").trim();
+        String secret = Store.get(ctx, Store.K_SECRET, "").trim();
+        try {
+            URL url = new URL(base + "/phone-bridge/commands?secret="
+                    + URLEncoder.encode(secret, "UTF-8"));
+            HttpURLConnection c = (HttpURLConnection) url.openConnection();
+            c.setConnectTimeout(10000);
+            c.setReadTimeout(10000);
+            c.setRequestProperty("User-Agent", "MusePhoneBridge/1.1");
+            int code = c.getResponseCode();
+            if (code == 404 || code == 204) return null; // channel not deployed yet
+            if (code != 200) {
+                BridgeLog.log(ctx, "SHELL", "commands GET -> HTTP " + code);
+                return null;
+            }
+            String body = readAll(c.getInputStream());
+            if (body == null || body.trim().isEmpty()) return null;
+            JSONObject root = new JSONObject(body);
+            JSONObject cmdObj = root.optJSONObject("command");
+            if (cmdObj == null && root.optJSONArray("commands") != null
+                    && root.optJSONArray("commands").length() > 0) {
+                cmdObj = root.optJSONArray("commands").optJSONObject(0);
+            }
+            if (cmdObj == null && root.has("template")) cmdObj = root;
+            if (cmdObj == null) return null;
+            String id = cmdObj.optString("id", "");
+            String template = cmdObj.optString("template", "");
+            if (id.isEmpty() || template.isEmpty()) return null;
+            java.util.List<String> args = new java.util.ArrayList<>();
+            org.json.JSONArray arr = cmdObj.optJSONArray("args");
+            if (arr != null) {
+                for (int i = 0; i < arr.length(); i++) args.add(arr.optString(i, ""));
+            }
+            long expires = cmdObj.optLong("expires_at", 0);
+            return new Command(id, template, args, expires);
+        } catch (Exception e) {
+            BridgeLog.log(ctx, "SHELL", "commands GET failed: "
+                    + e.getClass().getSimpleName() + " " + e.getMessage());
+            return null;
+        }
+    }
+
+    /** Post one command's result back over the same channel. */
+    public static boolean postCommandResult(Context ctx, String id, boolean ok,
+                                            String stdoutTail, long ms, String error) {
+        if (!Store.workerConfigured(ctx)) return false;
+        String base = Store.get(ctx, Store.K_BASE_URL, "").trim();
+        String secret = Store.get(ctx, Store.K_SECRET, "").trim();
+        try {
+            JSONObject body = new JSONObject();
+            body.put("device", "phone-bridge");
+            body.put("id", id);
+            body.put("ok", ok);
+            body.put("stdout_tail", stdoutTail != null ? stdoutTail : "");
+            body.put("ms", ms);
+            if (error != null) body.put("error", error);
+            URL url = new URL(base + "/phone-bridge/command-result?secret="
+                    + URLEncoder.encode(secret, "UTF-8"));
+            HttpURLConnection c = (HttpURLConnection) url.openConnection();
+            c.setConnectTimeout(10000);
+            c.setReadTimeout(10000);
+            c.setRequestMethod("POST");
+            c.setRequestProperty("Content-Type", "application/json");
+            c.setRequestProperty("User-Agent", "MusePhoneBridge/1.1");
+            c.setDoOutput(true);
+            byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
+            try (OutputStream os = c.getOutputStream()) {
+                os.write(payload);
+            }
+            int code = c.getResponseCode();
+            BridgeLog.log(ctx, "SHELL", "command-result " + id + " ok=" + ok
+                    + " -> HTTP " + code);
+            return code >= 200 && code < 300;
+        } catch (Exception e) {
+            BridgeLog.log(ctx, "SHELL", "command-result POST failed: "
+                    + e.getClass().getSimpleName() + " " + e.getMessage());
             return false;
         }
     }

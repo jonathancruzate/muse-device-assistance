@@ -350,3 +350,40 @@ notification channel IDs are all exactly as v1.3.2 shipped them.
   uninstalled and the new app kept reporting. The retired
   `Muse-Phone-Bridge-1.3.2.apk` is kept locally as the rollback
   build.
+
+## v1.4.0 — Loopback shell bridge (2026-11-05)
+
+The v1.4 design (`docs/loopback-shell-bridge-v1.4-design-2026-11-04.md`)
+built via Route B: the app pairs once in-app with the phone's own
+wireless debugging (SPAKE2 + TLS 1.3 via libadb-android 3.1.0,
+conscrypt-android 2.5.3, sun-security-android 1.1, spake2-android
+2.2.0, bcprov 1.81 — vendored under `app/libs/` as local-only build
+input, hashes in the design doc), holds a loopback ADB connection to
+itself, pulls ONE allowlisted structured command per bridge cycle
+from the Worker (`GET /phone-bridge/commands`), gates it through
+`ShellAllowlist`, executes it over a `shell:` stream (20 s timeout,
+16 KB output tail), and posts the result back
+(`POST /phone-bridge/command-result`); every report now also carries
+a `shell_bridge` state object. The executor stays inert until
+pairing completes and the post-pairing `battery` self-test passes
+(UI "Local shell" switch can disarm it at any time). Phase 2
+actuation is untouched and still defaults DISARMED.
+
+### Build record — v1.4.0 (2026-11-05)
+
+- APK: `app/Muse-Device-Assistance-1.4.0.apk`, 5,687,299 bytes,
+  SHA-256 `b422fb71b214ed009060428aa7f9ed104496b0e41cdcae85a6cdbcb8d4fa3535`
+- Same signing cert (`4dcb45fa...`) — installs over v1.3.2 in place.
+- Verified: apksigner cert read-back; aapt2 badging (package
+  `com.jonathancruzate.metamusedeviceassistance`, versionCode 7,
+  versionName 1.4.0, label "Muse Device Assistance", minSdk 29,
+  targetSdk 35, `extractNativeLibs=true`); build guards — 28 app
+  classes, all five library stacks present in the dex, no banned
+  androidx (annotation-only exception, see the design doc), native
+  libs (libconscrypt_jni, libspake2 × 4 ABIs) packaged; allowlist
+  gate re-tested on a plain JVM: 13/13 pass.
+- **NOT installed, NOT paired.** The installed version of record
+  remains the renamed v1.3.2. Pairing + self-test + one real
+  template end-to-end (and the Worker-side command endpoints, not
+  yet deployed) are the remaining steps — see the design doc.
+

@@ -1,10 +1,15 @@
 # v1.4 Loopback Shell Bridge — design (2026-11-04)
 
-Status: **DESIGN + ALLOWLIST ENGINE BUILT; executor blocked on the
-pairing crypto decision and on-device verification.** Built in the
-2026-11-04 ADB-tooling backlog run. Nothing here is in a shipped APK;
-v1.3.2 remains the installed version of record. Per the backlog rule,
-this doc is the evidence trail instead of a forced build.
+Status: **BUILT 2026-11-05 (v1.4.0, Route B) — awaiting the pairing
+session with Jonathan; NOT installed.** The command channel, loopback
+executor, pairing flow, and allowlist gate are implemented and the
+APK is built and verified offline (see the build record at the end
+of this doc). The renamed v1.3.2 remains the installed version of
+record. Remaining before it is live: install v1.4.0, the one-time
+pairing below, the self-test, and one real template end-to-end via
+the Worker — plus the Worker-side `/phone-bridge/commands` and
+`/phone-bridge/command-result` endpoints, which do not exist yet
+(the app treats a 404 as "no channel" and stays inert).
 
 ## What v1.4 is
 
@@ -156,3 +161,49 @@ connect port; the app already discovers it via AdbBridge mDNS.
    (`standby_set_active` for Tailscale) end-to-end via the Worker.
 4. Only then: GitHub snapshot + Release v1.4.0 (standard bundle),
    and the voicemail-borrow migration (depends on v1.4) unblocks.
+
+## Build record — v1.4.0 (2026-11-05)
+
+Route B executed. Step 2 of the checklist above was completed with
+these artifacts (fetched 2026-11-05; the AARs/JAR are vendored as
+extracted classes.jar + jni/ under `app/libs/`, local-only build
+input like the keystore — recreate from these coordinates + hashes):
+
+| Artifact | Source | SHA-256 |
+|---|---|---|
+| libadb-android-3.1.0.aar | JitPack `com.github.MuntashirAkon:libadb-android:3.1.0` | `e6fcb495a20a507ca4a125afc9c554e838a84b3a15fbcc29f7deafd0f88bbb58` |
+| sun-security-android-1.1.aar | JitPack `com.github.MuntashirAkon:sun-security-android:1.1` | `b6421c5b446fc574af47e61161b0ac67bea37b84a1ac400ba1cee74634628f54` |
+| spake2-android-2.2.0.aar (libadb transitive) | JitPack `com.github.MuntashirAkon.spake2-java:spake2-android:2.2.0` | `ee1210525de61e5eb9fe1a08d1d650b3a821a97d5429a73bb0c31ba12ffc68a7` |
+| conscrypt-android-2.5.3.aar | Maven Central `org.conscrypt:conscrypt-android:2.5.3` | `551ae4e301c571760d1791e647db6ed1dcb10d34dcae7aa12b67f220f2ce98d1` |
+| bcprov-jdk15to18-1.81.jar (libadb transitive) | Maven Central `org.bouncycastle:bcprov-jdk15to18:1.81` | `0ef9c4d9536719aaa1c92a7c694d87981fa9d4d64dd9479cc322a08aebbc651e` |
+
+Implemented: `LoopbackAdb` (identity in app-private files,
+RSA 2048 + self-signed cert via sun-security; connect to the
+AdbBridge-discovered endpoint, loopback first; one `shell:` stream
+per command, 20 s hard timeout, 16 KB output tail, reap on error),
+`ShellBridge` (one command per cycle after fetchDesired; TTL check;
+ShellAllowlist gate; result POST; `shell_bridge` object added to
+every report), WorkerClient `fetchCommand`/`postCommandResult`,
+the MainActivity pairing screen + "Local shell" disarm switch, and
+the build.sh libs stage. The dex guard amendment is narrow: androidx
+stays banned except `androidx.annotation` (the compile-time
+annotation artifact the libraries carry; d8 strips annotations and
+they never execute). The allowlist gate re-tested on a plain JVM
+against the renamed sources: 13/13 pass.
+
+- APK: `app/Muse-Device-Assistance-1.4.0.apk`, 5,687,299 bytes,
+  SHA-256 `b422fb71b214ed009060428aa7f9ed104496b0e41cdcae85a6cdbcb8d4fa3535`
+- Signing cert unchanged (`4dcb45fa...`). Badging: package
+  `com.jonathancruzate.metamusedeviceassistance`, versionCode 7,
+  versionName 1.4.0, label "Muse Device Assistance", minSdk 29,
+  targetSdk 35, `extractNativeLibs=true` (new in v1.4, for the JNI
+  libs: libconscrypt_jni + libspake2, arm64-v8a/armeabi-v7a/x86/x86_64).
+- Build guards: 28 app classes; library presence verified in dex
+  (libadb, conscrypt, sun-security x509, BouncyCastle, spake2);
+  native libs verified in the APK. Single classes.dex.
+- Phase 2 untouched: arm state still defaults DISARMED.
+- Known executor limit: the classic `shell:` stream carries no exit
+  code, so results report ok = stream completed, exit = -1.
+- NOT installed, NOT paired: the pairing UX above is Jonathan's
+  one-time session. Worker endpoints (checklist step 3's other half)
+  still to be deployed server-side.

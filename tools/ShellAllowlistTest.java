@@ -1,4 +1,4 @@
-import com.jonathancruzate.metamusephonebridge.ShellAllowlist;
+import com.jonathancruzate.metamusedeviceassistance.ShellAllowlist;
 import java.util.*;
 public class ShellAllowlistTest {
   static int fails=0;

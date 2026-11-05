@@ -79,6 +79,7 @@ public class BridgeService extends Service {
     @Override
     public void onDestroy() {
         BridgeLog.log(this, "SERVICE", "destroyed");
+        LoopbackAdb.close(this);
         if (handler != null) handler.removeCallbacksAndMessages(null);
         if (thread != null) thread.quitSafely();
         super.onDestroy();
@@ -96,6 +97,7 @@ public class BridgeService extends Service {
             boolean configured = Store.workerConfigured(this);
             if (configured) {
                 WorkerClient.fetchDesired(this);
+                ShellBridge.tick(this);
             }
             Reconciler.Verdict v = Reconciler.evaluate(this);
             Actuation.maybeAct(this, v);

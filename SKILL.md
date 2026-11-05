@@ -53,14 +53,21 @@ are the same document — update both in the same handling, always.
   `github-export/README.md`. At this writing: **v1.3.2, versionCode 6**
   (APK `app/Muse-Device-Assistance-1.3.2.apk`, SHA-256
   `3b2adc07d64eb000369f316bfa6f713a376e49c357109aba842166d82ab06166`,
-  rebuilt from the renamed canonical tree 2026-11-05. The retired
+  rebuilt from the renamed canonical tree 2026-11-05.
+- **v1.4.0 (versionCode 7) built 2026-11-05** — the loopback shell
+  bridge (design: `docs/loopback-shell-bridge-v1.4-design-2026-11-04.md`).
+  APK `app/Muse-Device-Assistance-1.4.0.apk`, SHA-256
+  `b422fb71b214ed009060428aa7f9ed104496b0e41cdcae85a6cdbcb8d4fa3535`.
+  **Built, NOT installed** — the installed version of record remains
+  the renamed v1.3.2 above until the one-time pairing session with
+  Jonathan (in-app pairing + self-test) lands it. The retired
   `app/Muse-Phone-Bridge-1.3.2.apk`, SHA-256
   `1f2055ca02987af63cfea50d9610200223b2ec73d3ba4a7601a2d9ea7cd45cae`,
   is kept alongside as the rollback build.)
   The project-root `README.md` is **stale** (it stops at v1.1.0) — never
   cite it for current version or capability; `github-export/README.md`
   and `build.sh` govern.
-- minSdk 29 / targetSdk 35. Framework-only Android (no AndroidX), raw
+- minSdk 29 / targetSdk 35. Framework-only app code, raw
   javac/d8/aapt2 build (`cd app && ./build.sh`); the build **fails** if
   any app class is missing from the dex or the dex references any
   `androidx` class.
@@ -371,8 +378,9 @@ new `seq` will never re-fire.
 - Power-saving **tier** decisions (Standard vs Maximum) — the app
   reports the boolean only; the tier lane lives elsewhere.
 - Pairing or opening ADB connections from the app — v1.1 discovery
-  never connects, and the in-app local shell is a **future design
-  (v1.4 target), not built**. Phase 3 (MacroDroid mode macros retired,
+  never connects; the in-app local shell is **built in v1.4.0
+  (2026-11-05) but not installed or paired**, so no live lane uses
+  it yet. Phase 3 (MacroDroid mode macros retired,
   mode-sync repointed to publish-and-converge) is likewise **not in
   any shipped version**. Never present either as available.
 
@@ -386,10 +394,11 @@ play/pause/skip and volume, flashlight, native Do Not Disturb, a
 foreground-app read — are defined command-by-command in the connector
 doc (`~/workspace/custom-connectors/custom.device-assistance/CONNECTOR.md`),
 each marked EXTENSION until it ships. Their transport is this app's
-command channel (today's v1.4 target: in-app pairing with the phone's
-own wireless debugging, loopback ADB client, allowlisted commands
-only, results over the existing Worker channel — the same channel the
-2026-11-04 backlog build run is scoped to build). App launches and
+command channel (built in v1.4.0, 2026-11-05: in-app pairing with
+the phone's own wireless debugging, loopback ADB client, allowlisted
+commands only, results over the existing Worker channel — awaiting
+the pairing session before any of it is live, and the extension
+verbs themselves remain unbuilt). App launches and
 intents can also be executed on-device directly inside the app once a
 command channel exists; either way the result is only real when a
 Worker report or read-back verifies it. **None of the extension
@@ -480,7 +489,9 @@ long-press or the widget.
   report-verified in shape, not yet episode-proven on record.
 - The full local shell (in-app ADB pairing, loopback connection,
   allowlisted shell commands pulled down the Worker channel) is
-  designed only — now the v1.4 target, not built in any shipped APK.
+  built in v1.4.0 (2026-11-05) but **not installed, not paired, and
+  not live-verified**; the Worker-side command endpoints are also
+  not deployed yet, so the channel is inert until both land.
 - A programmatic off-device read of `bridge-log.txt` and a direct
   Muse→app IPC call are not documented anywhere in the repo.
 
