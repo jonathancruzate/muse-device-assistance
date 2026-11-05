@@ -1,25 +1,51 @@
-# Muse Phone Bridge — ground truth, verified acks, ADB + Tailscale self-heal
+# Muse Device Assistance — ground truth, verified acks, ADB + Tailscale self-heal
 
 The phone-side control plane for Jonathan's Galaxy S24+ mode-sync
 system: the custom app that **complements MacroDroid** by owning the
 truth, the verification, and the reconciliation logic Samsung's gated
 mode surfaces leave to everyone else. Built from the 2026-11-01
 investigation *"Custom app vs MacroDroid as the phone-control plane"*.
-Project: `~/workspace/muse-phone-bridge/` (repo
-`jonathancruzate/muse-phone-bridge`; the GitHub snapshot source is
-`github-export/` inside the project).
+Project: `~/workspace/muse-device-assistance/` (repo
+`jonathancruzate/muse-phone-bridge` until Jonathan's GitHub rename
+step lands, then `jonathancruzate/muse-device-assistance`; the GitHub
+snapshot source is `github-export/` inside the project).
+
+**Renamed 2026-11-03 (Jonathan's order, live voice call): Muse Phone
+Bridge → Muse Device Assistance** (an interim name applied earlier
+the same evening was superseded minutes later; this is the final
+name). The project, this skill, the local
+directory, and the Device Assistance connector now carry the new name,
+and the app is being extended from bridge access to full device
+control (roadmap in the connector doc,
+`~/workspace/custom-connectors/custom.device-assistance/CONNECTOR.md`;
+execution sequence in `RENAME-PLAN.md` at the project root). What has
+**not** changed yet, deliberately: the installed app's label ("Muse
+Phone Bridge"), its Android package
+(`com.jonathancruzate.metamusephonebridge`), and the wire names
+(Worker endpoint `/phone-bridge/report`, KV key `phonebridge:report`,
+report `device:"phone-bridge"`). A package rename is a new app
+identity — fresh install, grants and prefs do not carry — so it ships
+only as the staged, verified build in the rename plan (target:
+label "Muse Device Assistance", package
+`com.jonathancruzate.metamusedeviceassistance`, same naming convention
+as the current package), never as a silent swap under the live
+lanes. Until that build lands, on-device
+strings, UI labels, and prefs in this skill still say "Phone Bridge"
+because that is what the installed app says.
 
 This skill ships with the app (Jonathan's standing rule, 2026-11-03:
 every APK we build carries a skill teaching Muse how to interact with
 and use it). The in-repo copy is
-`~/workspace/muse-phone-bridge/SKILL.md`; the installed copy is
-`~/workspace/custom-skills/local-muse-phone-bridge/SKILL.md`. They are
-the same document — update both in the same handling, always.
+`~/workspace/muse-device-assistance/SKILL.md`; the installed copy is
+`~/workspace/custom-skills/local-muse-device-assistance/SKILL.md`. They
+are the same document — update both in the same handling, always.
 
 ## Identity and version source of truth
 
 - **Package:** `com.jonathancruzate.metamusephonebridge`
-  (label "Muse Phone Bridge")
+  (label "Muse Phone Bridge" — the installed app's identity is
+  unchanged by the 2026-11-03 project rename; the label + package
+  rename is the staged build in `RENAME-PLAN.md`, not yet shipped)
 - **Version source of truth:** `app/build.sh` — `VERSION_NAME` /
   `VERSION_CODE` in that script, backed by the build records in
   `github-export/README.md`. At this writing: **v1.3.2, versionCode 6**
@@ -344,6 +370,32 @@ new `seq` will never re-fire.
   mode-sync repointed to publish-and-converge) is likewise **not in
   any shipped version**. Never present either as available.
 
+## Device Assistance extension (roadmap — not built in any shipped version)
+
+The renamed app is the engine for the **Device Assistance** connector:
+Jonathan's direction (2026-11-03) is to extend it from bridge access
+to full device control. The extension commands — launch an app by
+name (Google Maps first), open a navigation intent, media
+play/pause/skip and volume, flashlight, native Do Not Disturb, a
+foreground-app read — are defined command-by-command in the connector
+doc (`~/workspace/custom-connectors/custom.device-assistance/CONNECTOR.md`),
+each marked EXTENSION until it ships. Their transport is this app's
+command channel (today's v1.4 target: in-app pairing with the phone's
+own wireless debugging, loopback ADB client, allowlisted commands
+only, results over the existing Worker channel — the same channel the
+2026-11-04 backlog build run is scoped to build). App launches and
+intents can also be executed on-device directly inside the app once a
+command channel exists; either way the result is only real when a
+Worker report or read-back verifies it. **None of the extension
+commands exist in v1.3.2** — never present one as available, and the
+extension does not change the Phase 2 gates: actuation stays DISARMED
+unless Jonathan arms it in-app. Device-specific control is not core
+scope either: per the plugin architecture (Jonathan, 2026-11-03),
+this app is a slim host and device support plugs in as device
+connectors registered against it — Galaxy Buds first (namespace
+`buds`, its own plugin and connector), more devices later the same
+way. The core never interprets device semantics.
+
 ## Hard rules
 
 - **Never arm Phase 2, link a routine, or test-fire from Muse's
@@ -370,8 +422,11 @@ new `seq` will never re-fire.
   ADB *pairing* — discovery + wireless-debugging self-heal is the
   whole ADB surface.
 - Every build/change upstreams in the same handling: source push to
-  `jonathancruzate/muse-phone-bridge` (via the `github-export/`
-  snapshot), a GitHub Release where the project ships one (asset SHA
+  the project's GitHub repo (via the `github-export/` snapshot) — the
+  repo is `jonathancruzate/muse-phone-bridge` until Jonathan's GitHub
+  rename step lands and `jonathancruzate/muse-device-assistance` after
+  it; check the snapshot record's `repo` field for which is live
+  before pushing — a GitHub Release where the project ships one (asset SHA
   verified against the build), the findings/runbook doc, and this
   skill if the procedure changed — both copies, in the same handling.
 

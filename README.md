@@ -1,5 +1,15 @@
 # Muse Phone Bridge
 
+> **Project renamed 2026-11-03 (Jonathan's order): Muse Phone Bridge
+> -> Muse Device Assistance.** Canonical local home is now
+> `~/workspace/muse-device-assistance/`; the companion skill is
+> `local-muse-device-assistance`. This repo keeps the name
+> `muse-phone-bridge` until the owner's GitHub rename step lands.
+> The installed app's label and package are unchanged (the APK
+> rename is a staged build — see `RENAME-PLAN.md` in the project).
+> The build records below keep the name they were written under.
+
+
 The phone-side control plane for Jonathan's Galaxy S24+ mode-sync system —
 the custom app that **complements MacroDroid**, built from the 2026-11-01
 investigation *"Custom app vs MacroDroid as the phone-control plane"*
