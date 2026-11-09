@@ -35,6 +35,9 @@ public final class WorkerClient {
 
     /** Fetch desired state; stores it in Store. Returns true on success. */
     public static boolean fetchDesired(Context ctx) {
+        // TV profile: house-mode desired state is a phone surface.
+        // A Shield instance must never consume or echo it.
+        if (DeviceProfile.isTv(ctx)) return false;
         if (!Store.workerConfigured(ctx)) return false;
         String base = Store.get(ctx, Store.K_BASE_URL, "").trim();
         String secret = Store.get(ctx, Store.K_SECRET, "").trim();
@@ -87,29 +90,41 @@ public final class WorkerClient {
         String base = Store.get(ctx, Store.K_BASE_URL, "").trim();
         String secret = Store.get(ctx, Store.K_SECRET, "").trim();
         try {
+            boolean tv = DeviceProfile.isTv(ctx);
             JSONObject body = new JSONObject();
-            body.put("device", "phone-bridge");
+            body.put("device", DeviceProfile.deviceString(ctx));
+            body.put("profile", DeviceProfile.profileName(ctx));
             body.put("kind", kind);
             body.put("ts", System.currentTimeMillis());
 
             JSONObject observed = new JSONObject();
-            observed.put("mode", Reconciler.resolveObservedMode(
-                    Store.get(ctx, Store.K_GT_MODE, ""), Store.get(ctx, Store.K_GT_RUNNING, "")));
-            observed.put("raw_mode", Store.get(ctx, Store.K_GT_MODE, ""));
-            observed.put("running", Store.get(ctx, Store.K_GT_RUNNING, ""));
-            observed.put("at", Store.getLong(ctx, Store.K_GT_AT, 0));
-            observed.put("parse_ok", Store.getBool(ctx, Store.K_GT_PARSE_OK, false));
+            if (tv) {
+                // TV profile: Samsung mode ground truth is gated off.
+                observed.put("mode", "");
+                observed.put("raw_mode", "");
+                observed.put("running", "");
+                observed.put("at", 0);
+                observed.put("parse_ok", false);
+            } else {
+                observed.put("mode", Reconciler.resolveObservedMode(
+                        Store.get(ctx, Store.K_GT_MODE, ""), Store.get(ctx, Store.K_GT_RUNNING, "")));
+                observed.put("raw_mode", Store.get(ctx, Store.K_GT_MODE, ""));
+                observed.put("running", Store.get(ctx, Store.K_GT_RUNNING, ""));
+                observed.put("at", Store.getLong(ctx, Store.K_GT_AT, 0));
+                observed.put("parse_ok", Store.getBool(ctx, Store.K_GT_PARSE_OK, false));
+            }
             body.put("observed", observed);
 
             JSONObject desired = new JSONObject();
-            desired.put("mode", Store.get(ctx, Store.K_DESIRED_MODE, ""));
-            desired.put("seq", Store.getLong(ctx, Store.K_DESIRED_SEQ, -1));
+            desired.put("mode", tv ? "" : Store.get(ctx, Store.K_DESIRED_MODE, ""));
+            desired.put("seq", tv ? -1 : Store.getLong(ctx, Store.K_DESIRED_SEQ, -1));
             body.put("desired", desired);
 
-            String verdict = Store.get(ctx, Store.K_VERDICT, "unknown");
+            // On TV there is no reconciler verdict: never claim an ack.
+            String verdict = tv ? "unknown" : Store.get(ctx, Store.K_VERDICT, "unknown");
             body.put("verdict", verdict);
-            body.put("ack", "in_sync".equals(verdict));
-            body.put("plan", Store.get(ctx, Store.K_PLAN, ""));
+            body.put("ack", !tv && "in_sync".equals(verdict));
+            body.put("plan", tv ? "tv profile: phone surfaces gated off" : Store.get(ctx, Store.K_PLAN, ""));
             body.put("status", StatusProducer.produce(ctx));
             body.put("adb", AdbBridge.snapshot(ctx));
             body.put("tailscale", TailscaleGuard.snapshot(ctx));
@@ -173,7 +188,8 @@ public final class WorkerClient {
         String secret = Store.get(ctx, Store.K_SECRET, "").trim();
         try {
             URL url = new URL(base + "/phone-bridge/commands?secret="
-                    + URLEncoder.encode(secret, "UTF-8"));
+                    + URLEncoder.encode(secret, "UTF-8")
+                    + "&device=" + URLEncoder.encode(DeviceProfile.deviceString(ctx), "UTF-8"));
             HttpURLConnection c = (HttpURLConnection) url.openConnection();
             c.setConnectTimeout(10000);
             c.setReadTimeout(10000);
@@ -219,14 +235,15 @@ public final class WorkerClient {
         String secret = Store.get(ctx, Store.K_SECRET, "").trim();
         try {
             JSONObject body = new JSONObject();
-            body.put("device", "phone-bridge");
+            body.put("device", DeviceProfile.deviceString(ctx));
             body.put("id", id);
             body.put("ok", ok);
             body.put("stdout_tail", stdoutTail != null ? stdoutTail : "");
             body.put("ms", ms);
             if (error != null) body.put("error", error);
             URL url = new URL(base + "/phone-bridge/command-result?secret="
-                    + URLEncoder.encode(secret, "UTF-8"));
+                    + URLEncoder.encode(secret, "UTF-8")
+                    + "&device=" + URLEncoder.encode(DeviceProfile.deviceString(ctx), "UTF-8"));
             HttpURLConnection c = (HttpURLConnection) url.openConnection();
             c.setConnectTimeout(10000);
             c.setReadTimeout(10000);

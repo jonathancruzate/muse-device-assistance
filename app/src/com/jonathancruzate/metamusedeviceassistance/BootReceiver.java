@@ -11,6 +11,13 @@ public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context ctx, Intent intent) {
         if (intent == null || !Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) return;
+        if (DeviceProfile.isTv(ctx)) {
+            BridgeLog.log(ctx, "BOOT", "tv profile: auto-starting bridge service after boot");
+            try { BridgeService.start(ctx); } catch (Exception e) {
+                BridgeLog.log(ctx, "BOOT", "tv auto-start failed: " + e.getMessage());
+            }
+            return;
+        }
         if (Store.getBool(ctx, Store.K_SERVICE_ON, false)) {
             BridgeLog.log(ctx, "BOOT", "restarting bridge service after boot");
             try {

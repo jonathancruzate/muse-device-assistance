@@ -29,6 +29,7 @@ public final class StatusProducer {
     private StatusProducer() {}
 
     public static JSONObject produce(Context ctx) {
+        if (DeviceProfile.isTv(ctx)) return produceTv(ctx);
         JSONObject o = new JSONObject();
         try {
             Intent batt = ctx.registerReceiver(null,
@@ -85,6 +86,37 @@ public final class StatusProducer {
         } catch (JSONException ignored) {
             // org.json in-memory puts do not fail on these types.
         }
+        return o;
+    }
+
+    /** TV status set (v1.5.0): deliberately NOT the phone set. */
+    public static JSONObject produceTv(Context ctx) {
+        JSONObject o = new JSONObject();
+        try {
+            o.put("profile", "tv");
+            o.put("model", android.os.Build.MODEL);
+            o.put("manufacturer", android.os.Build.MANUFACTURER);
+            o.put("sdk", android.os.Build.VERSION.SDK_INT);
+            PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
+            if (pm != null) o.put("screen_on", pm.isInteractive());
+            ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null) {
+                Network n = cm.getActiveNetwork();
+                NetworkCapabilities caps = n == null ? null : cm.getNetworkCapabilities(n);
+                String net = "none";
+                if (caps != null) {
+                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) net = "ethernet";
+                    else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) net = "wifi";
+                    else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) net = "cellular";
+                }
+                o.put("network", net);
+            }
+            File data = Environment.getDataDirectory();
+            StatFs stat = new StatFs(data.getPath());
+            o.put("storage_total_gb", stat.getTotalBytes() / (1024L * 1024 * 1024));
+            o.put("storage_free_gb", stat.getAvailableBytes() / (1024L * 1024 * 1024));
+            o.put("ts", System.currentTimeMillis());
+        } catch (JSONException ignored) {}
         return o;
     }
 }

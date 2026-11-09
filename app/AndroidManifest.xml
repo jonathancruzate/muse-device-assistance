@@ -14,7 +14,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- v1.4.2: specialUse replaces dataSync. dataSync carries a
+         platform time budget (~6 h) that a 24/7 bridge always
+         exhausts; on Android 17 the exhaustion crashed the process
+         (ForegroundServiceDidNotStopInTime / StartNotAllowed loop,
+         chronic since 2026-11-05). specialUse has no such budget. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -33,6 +38,25 @@
          com.jonathancruzate.metamusedeviceassistance
          android.permission.WRITE_SECURE_SETTINGS -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <!-- v1.5 extension pack: buzz confirmations for the voice module
+         (same as the shortcut app), and CAMERA for the flashlight
+         verb — setTorchMode itself does not open the camera; the
+         declaration covers builds that gate torch behind it, and the
+         grant (if ever needed) is a one-time pm grant like
+         WRITE_SECURE_SETTINGS above. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+    <!-- TV profile (v1.5.0): declare Leanback as optional so the same
+         APK installs on Android TV (Shield) and phones alike. -->
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <!-- v1.5 voice module: the accessibility hunt inspects only the
+         Muse window (com.facebook.aura). -->
+    <queries>
+        <package android:name="com.facebook.aura" />
+    </queries>
 
     <application
         android:label="Muse Device Assistance"
@@ -46,6 +70,7 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
 
@@ -53,7 +78,7 @@
              notifications on-device (the same dump text the server-side
              system already treats as ground truth). -->
         <service android:name=".GroundTruthListener"
-            android:label="Muse Device Assistance ground truth"
+            android:label="Muse Device Assistance"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -63,7 +88,33 @@
 
         <service android:name=".BridgeService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Continuous owner-device bridge: 60-second loop reporting house-mode ground truth to the owner's server, self-healing the phone's wireless-debugging endpoint, and reviving Tailscale. It must run 24/7; no time-budgeted foreground-service type (dataSync ~6 h) can hold it, and exhaustion of that budget crash-looped the service." />
+        </service>
+
+        <!-- v1.5 voice-mode module: accessibility service for the
+             Muse voice/end button hunts. Jonathan enables it in
+             Settings → Accessibility → Installed apps → Muse Device
+             Assistance. Separate from the Muse Voice Mode Shortcut
+             app's service (different package, separate grant). -->
+        <service android:name=".VoiceAccessibilityService"
+            android:label="Muse Device Assistance"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/da_accessibility_config" />
+        </service>
+
+        <!-- v1.5.1 plugin bus: receives Galaxy Buds plugin results
+             delivered through the per-command PendingIntent the router
+             hands the plugin (delivery carries this app's identity, so
+             the receiver stays non-exported). -->
+        <receiver android:name=".BudsResultReceiver" android:exported="false" />
 
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>

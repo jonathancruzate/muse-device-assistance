@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
@@ -37,7 +38,12 @@ public class BridgeService extends Service {
     public static void start(Context ctx) {
         Store.put(ctx, Store.K_SERVICE_ON, true);
         Intent i = new Intent(ctx, BridgeService.class);
-        ctx.startForegroundService(i);
+        try {
+            ctx.startForegroundService(i);
+        } catch (Exception ignored) {
+            // Same discipline as requestCycle: a refused FGS start must
+            // never take the caller (UI / boot / listener) down with it.
+        }
     }
 
     public static void stop(Context ctx) {
@@ -59,11 +65,28 @@ public class BridgeService extends Service {
     public void onCreate() {
         super.onCreate();
         createChannel();
-        startForeground(1, statusNotification("starting"));
+        try {
+            startForeground(1, statusNotification("starting"),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+        } catch (RuntimeException e) {
+            // v1.4.2: NEVER crash in onCreate. Through v1.4.1 this call
+            // was unguarded with type dataSync; once the platform's
+            // dataSync time budget was exhausted, startForeground threw
+            // ForegroundServiceStartNotAllowedException here and every
+            // restart crash-looped ("Unable to create service",
+            // chronic since 2026-11-05). A refused start is a clean
+            // stop instead — the next boot / UI start / listener cycle
+            // can try again without a crash record.
+            BridgeLog.log(this, "SERVICE", "startForeground refused: "
+                    + e.getClass().getSimpleName() + " " + e.getMessage()
+                    + " — stopping cleanly");
+            stopSelf();
+            return;
+        }
         thread = new HandlerThread("bridge-loop");
         thread.start();
         handler = new Handler(thread.getLooper());
-        BridgeLog.log(this, "SERVICE", "created");
+        BridgeLog.log(this, "SERVICE", "created profile=" + DeviceProfile.describe(this));
         AdbBridge.startDiscovery(this);
         handler.post(this::cycle);
     }
@@ -74,6 +97,21 @@ public class BridgeService extends Service {
             handler.post(this::cycle);
         }
         return START_STICKY;
+    }
+
+    /**
+     * Platform FGS time-budget callback (API 35+). If a future OS ever
+     * time-limits the specialUse type the way it limited dataSync, the
+     * contract is: stop promptly and cleanly. Through v1.4.1 there was
+     * no handler, so the system's dataSync timeout killed the process
+     * with ForegroundServiceDidNotStopInTimeException instead.
+     */
+    @Override
+    public void onTimeout(int startId, int fgsType) {
+        BridgeLog.log(this, "SERVICE", "FGS onTimeout startId=" + startId
+                + " type=" + fgsType + " — stopping cleanly");
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        stopSelf();
     }
 
     @Override
@@ -94,8 +132,9 @@ public class BridgeService extends Service {
         try {
             AdbBridge.tick(this);
             TailscaleGuard.tick(this);
+            boolean tv = DeviceProfile.isTv(this);
             boolean configured = Store.workerConfigured(this);
-            if (configured) {
+            if (configured && !tv) {
                 WorkerClient.fetchDesired(this);
                 ShellBridge.tick(this);
             }
@@ -121,6 +160,12 @@ public class BridgeService extends Service {
     }
 
     private void updateNotification(Reconciler.Verdict v) {
+        if (DeviceProfile.isTv(this)) {
+            NotificationManager nmTv = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nmTv != null) nmTv.notify(1, statusNotification(
+                    "Shield TV profile - shieldbridge - observing (phone surfaces off)"));
+            return;
+        }
         String mode = Reconciler.resolveObservedMode(
                 Store.get(this, Store.K_GT_MODE, "?"), Store.get(this, Store.K_GT_RUNNING, ""));
         String desired = Store.get(this, Store.K_DESIRED_MODE, "?");

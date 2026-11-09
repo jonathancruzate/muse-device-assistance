@@ -86,7 +86,9 @@ public final class AdbBridge {
             for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
                 if (!ni.isUp() || ni.isLoopback()) continue;
                 String name = ni.getName().toLowerCase();
-                if (!name.startsWith("wlan") && !name.startsWith("wifi")) continue;
+                boolean nameOk = name.startsWith("wlan") || name.startsWith("wifi")
+                        || (DeviceProfile.isTv(ctx) && name.startsWith("eth"));
+                if (!nameOk) continue;
                 for (InetAddress addr : Collections.list(ni.getInetAddresses())) {
                     if (addr instanceof Inet4Address && !addr.isLoopbackAddress()) {
                         return addr.getHostAddress();
@@ -113,6 +115,7 @@ public final class AdbBridge {
     /** Called once per bridge cycle. Heals wireless debugging if armed
      *  and permitted; logs grant-need at most every 6 hours. */
     public static void tick(Context ctx) {
+        if (DeviceProfile.isTv(ctx)) { tickTv(ctx); return; }
         boolean on = wirelessDebuggingOn(ctx);
         if (on) return;
         if (!selfHealArmed(ctx)) return;
@@ -294,10 +297,33 @@ public final class AdbBridge {
 
     // -------------------------------------------------------------- snapshot
 
+    /**
+     * TV heal variant (v1.5.0) \u2014 NO-OP WITH LOGGING, deliberately.
+     * On the NVIDIA Shield, Settings.Global adb_wifi_enabled reads 0
+     * while LAN ADB on :5555 is up and answering (verified live
+     * 2026-11-08). NVIDIA's network-debugging switch is therefore NOT
+     * adb_wifi_enabled; no other stock key for it was provable. The TV
+     * heal never writes it; it logs (throttled 6h) instead.
+     */
+    public static void tickTv(Context ctx) {
+        long last = Store.getLong(ctx, Store.K_ADB_HEAL_LAST_LOG, 0);
+        if (System.currentTimeMillis() - last > 6 * 60 * 60 * 1000) {
+            Store.put(ctx, Store.K_ADB_HEAL_LAST_LOG, System.currentTimeMillis());
+            BridgeLog.log(ctx, "ADB_HEAL", "tv profile: heal is no-op \u2014 adb_wifi_enabled="
+                    + (wirelessDebuggingOn(ctx) ? 1 : 0)
+                    + " does not describe NVIDIA network debugging (LAN :5555); not flipping it");
+        }
+    }
+
     public static JSONObject snapshot(Context ctx) {
         JSONObject o = new JSONObject();
         try {
             o.put("wireless_debugging", wirelessDebuggingOn(ctx));
+            if (DeviceProfile.isTv(ctx)) {
+                o.put("profile", "tv");
+                o.put("heal_mode", "tv_noop");
+                o.put("tv_note", "adb_wifi_enabled does not describe NVIDIA network debugging; heal never writes it on TV");
+            }
             o.put("secure_settings_granted", secureSettingsGranted(ctx));
             o.put("self_heal_armed", selfHealArmed(ctx));
             o.put("endpoint", Store.get(ctx, Store.K_ADB_ENDPOINT, ""));

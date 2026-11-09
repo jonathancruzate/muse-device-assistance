@@ -387,3 +387,133 @@ actuation is untouched and still defaults DISARMED.
   template end-to-end (and the Worker-side command endpoints, not
   yet deployed) are the remaining steps — see the design doc.
 
+
+## v1.4.1 / v1.4.2 — Self-test negotiation fix; dataSync crash-loop fix (2026-11-08)
+
+- v1.4.1 (versionCode 8): `LoopbackAdb.setApi(Build.VERSION.SDK_INT)`
+  — v1.4.0 negotiated as a legacy feature-less ADB client and adbd
+  closed every `shell:` stream after OKAY. (This root-cause theory
+  was DISPROVEN 2026-11-08 — see the v1.4.3 record below; the real
+  cause was a libadb end-of-stream race. The setApi change is
+  correct and kept.) APK
+  `app/Muse-Device-Assistance-1.4.1.apk`, 5,687,299 bytes, SHA-256
+  `19a9ad627a8aa7d823718981faeb3f2b0d0a9a0a4f3f4481b50cb2887f27181e`,
+  same cert. Installed 2026-11-08 04:02:59 EST; pairing survived.
+  Full record: `docs/execution-2026-11-08.md` section (e).
+- v1.4.2 (versionCode 9): BridgeService FGS type dataSync →
+  specialUse (dataSync's ~6 h platform budget crash-looped the
+  24/7 service since 2026-11-05: DidNotStopInTime on timeout, then
+  StartNotAllowed in onCreate on every restart), guarded
+  startForeground, and an `onTimeout` clean-stop. APK
+  `app/Muse-Device-Assistance-1.4.2.apk`, 5,687,299 bytes, SHA-256
+  `f9cbb9379a1ddb32e8a33a161fd8f1958571ac095d3fbfdd70898483b036a3d7`,
+  same cert; allowlist gate ALL_PASS; installed 2026-11-08
+  10:26:56 EST, verified stable with no new crash records.
+  Full record: `docs/execution-2026-11-08.md` section (f).
+
+
+## v1.4.3 — Loopback shell bridge LIVE: libadb end-of-stream race fix (2026-11-08)
+
+- v1.4.3 (versionCode 11): the `battery` self-test kept failing
+  (~40–95 ms, `IOException: Stream closed.`) even after the fresh
+  17:07 EST pairing and v1.4.1's modern negotiation. An
+  instrumented diagnostic build (v1.4.3-diag1, versionCode 10, APK
+  SHA-256
+  `58af89c498ad123967adaa7250616e518ccfe22b25114a614314ec949abca42e`)
+  proved the app was receiving the FULL command output (13,069
+  bytes for `dumpsys battery`) and then throwing on the next read:
+  libadb-android 3.1.0's CLSE handling marks a stream hard-closed
+  whenever its read queue is momentarily empty — including with
+  the last payload undrained in the reader's buffer — so
+  `AdbStream.read()` throws "Stream closed." instead of returning
+  -1 at end-of-stream. A raw wire probe had already cleared the
+  daemon and the CNXN-negotiation theory (feature-less CNXN got
+  full payload from the same adbd). Fix in `LoopbackAdb`: a
+  `"Stream closed."` throw while the connection is alive is
+  treated as EOF. APK `app/Muse-Device-Assistance-1.4.3.apk`,
+  5,687,299 bytes, SHA-256
+  `b40b70827b6b03380be05983c01e28ad2dd1fb64ad2853c3d6a982ffbaec4d6b`,
+  same cert; allowlist gate ALL_PASS; installed 2026-11-08
+  17:39:35 EST; pairing survived. **Proven live the same
+  handling**: Worker `battery` → `ok:true` (full output, 75 ms)
+  and `getprop_model` → `ok:true` — the first end-to-end Worker
+  command completions. The report's `self_test_ok` flag still
+  awaits Jonathan's one in-app self-test tap (same execute path).
+  Full record: `docs/execution-2026-11-08.md` section (g).
+
+## v1.5.0 — Extension pack + voice-mode module (+ TV profile) (2026-11-08)
+
+- v1.5.0 (versionCode 12): the connector's EXTENSION verbs built
+  as allowlist templates — 11 shell templates (`app_launch`,
+  `nav_open`, `media_play_pause`, `media_next`, `media_previous`,
+  `media_volume`, `media_volume_set`, `media_volume_get`,
+  `dnd_on`, `dnd_off`, `screen_foreground`) + 3 gated native
+  templates (`flashlight`, `flashlight_status`, `voice_mode`;
+  CameraManager torch and the voice module have no shell form on
+  this build). The voice-mode self-activation module (the Muse
+  Voice Mode Shortcut's accessibility mechanism folded in) ships
+  OFF by default behind a two-key gate. The same binary carries
+  the ratified TV profile (`DeviceProfile`, `docs/tv-profile-
+  v1.5.0-2026-11-08.md`). Every verb was ADB-lane-proven on the
+  phone before encoding, then live-verified via the Worker
+  channel with independent read-backs (section (h) of the
+  execution record): all pack verbs LIVE except `voice_mode`,
+  which is built-but-not-live (gate refusal proven; full toggle
+  awaits Jonathan's in-app module enable + accessibility grant).
+  Gate tests ALL_PASS; all build guards pass. APK
+  `app/Muse-Device-Assistance-1.5.0.apk`, 5,699,668 bytes,
+  SHA-256
+  `8dfbba37bc998e476de64732b945bad8db9096af8e6a91fef845a928e20666e9`,
+  same cert; installed 2026-11-08 20:53:57 EST in place; pairing
+  + `self_test_ok:true` survived. Operating rule learned: enqueue
+  Worker commands singly (one execution per fetch, newest
+  first). Full record: `docs/execution-2026-11-08.md` section (h).
+
+## v1.5.1 — Rename fix + Galaxy Buds host routing; voice_mode LIVE (2026-11-08)
+
+- v1.5.1 (versionCode 13): the accessibility services' user-visible
+  labels are now exactly "Muse Device Assistance" (component names
+  unchanged; the accessibility grant survived the in-place
+  install). `BudsRouter` + `BudsResultReceiver` route the new
+  allowlisted `buds_*` native templates to the separate Muse
+  Galaxy Buds plugin APK (v1.0.1) and return its typed results —
+  the core stays slim. Gate tests extended, ALL_PASS. APK
+  `app/Muse-Device-Assistance-1.5.1.apk`, 5,699,668 bytes,
+  SHA-256
+  `84ed5b9d49c978efc8fa92adb5cb7cc5bdfe5e661292e2f1605db43ded0f4872`,
+  same cert; installed 2026-11-08 22:55:37 EST in place; pairing +
+  `self_test_ok:true` survived (post-install report verified). The
+  voice-mode module went LIVE the same night (Jonathan enabled it;
+  full toggle pair verified on this build) under his 2026-11-08
+  discretion grant + the SPEAK-FIRST rule (skill voice section).
+  Buds: routing + gates proven live (typed `buds_not_connected`
+  refusals), volume verbs live-verified via the plugin; SPP verbs
+  built, not yet live-verified (his Buds2 were disconnected).
+  Full record: `docs/execution-2026-11-08.md` section (i).
+
+## v1.5.2 — Voice state-desync fix: belief reconciliation (2026-11-08)
+
+- v1.5.2 (versionCode 14): the voice module's persisted
+  `voice_active` belief is reconciled against observed reality.
+  On v1.5.1 a session ended on the Muse side (hang-up inside
+  Muse) never cleared the flag, and the next `voice_mode on`
+  returned "already active, no-op" against the dead session
+  (proven live 2026-11-08 23:28). The accessibility service now
+  observes Muse's session UI (live-verified markers:
+  `hatch-voice-end-call-button`, `hatch-voice-call-connected`,
+  `hatch-floating-call-controls`, "End voice call" / "Mute voice
+  call"), clears the flag when the session UI leaves, and every
+  `voice_mode` op re-checks the flag against that observation
+  before trusting it (15 s grace for in-flight transitions).
+  Live-verified after install: from the reproduced stale state
+  (report `voice_active:true`, no session on screen), `on`
+  dispatched a real start three times running; the belief
+  converged to false on its own after externally ended sessions;
+  off->on dispatched cleanly. Both voice gates unchanged; gate
+  tests ALL_PASS; all build guards pass. APK
+  `app/Muse-Device-Assistance-1.5.2.apk`, 5,703,764 bytes,
+  SHA-256
+  `dfced7cd1d89ae3f129725b92dd504ed4a52b695262b70e79b708c43aa82631c`,
+  same cert; installed 2026-11-08 23:40:49 EST in place; pairing
+  + self-test survived (post-install report verified). Full
+  record: `docs/execution-2026-11-08.md` section (k).

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_desc">Lets Muse start and stop Muse voice mode for you: when a voice command you authorized arrives, it taps Muse\'s own voice or end-call button. It only ever looks at the Muse app window, and only while a start/stop is in flight.</string>
+</resources>

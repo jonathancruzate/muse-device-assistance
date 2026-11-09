@@ -20,6 +20,10 @@ public class GroundTruthListener extends NotificationListenerService {
 
     @Override
     public void onListenerConnected() {
+        if (DeviceProfile.isTv(this)) {
+            BridgeLog.log(this, "LISTENER", "tv profile: ground-truth listener inert (phone surface gated off)");
+            return;
+        }
         BridgeLog.log(this, "LISTENER", "connected");
         // Sweep anything already in the shade.
         try {

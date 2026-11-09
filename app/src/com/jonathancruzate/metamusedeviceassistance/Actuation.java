@@ -27,6 +27,7 @@ public final class Actuation {
     private Actuation() {}
 
     public static void maybeAct(Context ctx, Reconciler.Verdict v) {
+        if (DeviceProfile.isTv(ctx)) return;
         if (!Store.getBool(ctx, Store.K_ACT_ARMED, false)) return;
         if (v == null || !"drift".equals(v.state)) return;
         String desired = Store.get(ctx, Store.K_DESIRED_MODE, "");

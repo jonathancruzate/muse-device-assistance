@@ -1,15 +1,25 @@
 # v1.4 Loopback Shell Bridge — design (2026-11-04)
 
-Status: **BUILT 2026-11-05 (v1.4.0, Route B) — awaiting the pairing
-session with Jonathan; NOT installed.** The command channel, loopback
-executor, pairing flow, and allowlist gate are implemented and the
-APK is built and verified offline (see the build record at the end
-of this doc). The renamed v1.3.2 remains the installed version of
-record. Remaining before it is live: install v1.4.0, the one-time
-pairing below, the self-test, and one real template end-to-end via
-the Worker — plus the Worker-side `/phone-bridge/commands` and
-`/phone-bridge/command-result` endpoints, which do not exist yet
-(the app treats a 404 as "no channel" and stays inert).
+Status: **BUILT 2026-11-05 (v1.4.0, Route B) — INSTALLED and
+server-side complete 2026-11-08; awaiting only the one-time pairing
+session with Jonathan.** The command channel, loopback executor,
+pairing flow, and allowlist gate are implemented and the APK is
+built and verified offline (see the build record at the end of this
+doc). Update 2026-11-08 (full record:
+`docs/execution-2026-11-08.md`): the Worker-side
+`/phone-bridge/commands`, `/phone-bridge/command-result`,
+`/phone-bridge/enqueue`, and `/phone-bridge/command-status`
+endpoints turned out to be already deployed (built 2026-11-05) and
+were verified live with a full enqueue→pull→result round-trip;
+v1.4.0 was verified installed on the S24+ (versionCode 7,
+BridgeService running, grants + deviceidle whitelist re-verified);
+and the Worker's report sanitizer was patched + redeployed the same
+day to keep the app's `shell_bridge` object, so pairing state is
+verifiable server-side (live report now carries
+`shell_bridge {paired:false, self_test_ok:false, on:false}`).
+Remaining before it is live: the one-time pairing below, the
+self-test it triggers, and one real template end-to-end via the
+Worker.
 
 ## What v1.4 is
 
@@ -207,3 +217,7 @@ against the renamed sources: 13/13 pass.
 - NOT installed, NOT paired: the pairing UX above is Jonathan's
   one-time session. Worker endpoints (checklist step 3's other half)
   still to be deployed server-side.
+- **Superseded 2026-11-08:** installed + endpoints verified live
+  (the endpoints had in fact been deployed 2026-11-05), report
+  `shell_bridge` passthrough deployed — see
+  `docs/execution-2026-11-08.md`. Only the pairing session remains.

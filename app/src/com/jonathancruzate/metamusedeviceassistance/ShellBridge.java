@@ -29,6 +29,9 @@ public final class ShellBridge {
 
     /** One command per cycle, per the design. Called on the bridge thread. */
     public static void tick(Context ctx) {
+        // TV profile gated off in v1.5.0: Shield debugging is LAN ADB
+        // (:5555), not the phone wireless-debugging pairing flow.
+        if (DeviceProfile.isTv(ctx)) return;
         if (!Store.getBool(ctx, Store.K_SHELL_ON, false)) return;
         if (!Store.getBool(ctx, Store.K_SHELL_PAIRED, false)) return;
         WorkerClient.Command cmd = WorkerClient.fetchCommand(ctx);
@@ -38,6 +41,32 @@ public final class ShellBridge {
             BridgeLog.log(ctx, "SHELL", cmd.id + " expired before execution; reporting");
             WorkerClient.postCommandResult(ctx, cmd.id, false, "", 0, "expired");
             record(ctx, cmd, false, 0);
+            return;
+        }
+
+        // v1.5: native (on-device) templates are gated by the same
+        // allowlist class but never become shell text.
+        if (ShellAllowlist.isNativeTemplate(cmd.template)) {
+            ShellAllowlist.NativeGate ng =
+                    ShellAllowlist.checkNative(cmd.template, cmd.args);
+            if (!ng.allowed) {
+                BridgeLog.log(ctx, "SHELL", cmd.id + " REFUSED template=" + cmd.template
+                        + ": " + ng.refusal);
+                WorkerClient.postCommandResult(ctx, cmd.id, false, "", 0,
+                        "refused: " + ng.refusal);
+                record(ctx, cmd, false, 0);
+                return;
+            }
+            LoopbackAdb.Result r = ng.op.startsWith("voice_")
+                    ? VoiceModeModule.execute(ctx, ng.op)
+                    : ng.op.startsWith("buds_")
+                    ? BudsRouter.execute(ctx, ng.op, ng.arg)
+                    : NativeCommands.execute(ctx, ng.op);
+            BridgeLog.log(ctx, "SHELL", cmd.id + " native " + cmd.template
+                    + " -> ok=" + r.ok + " " + r.ms + "ms"
+                    + (r.error != null ? " error=" + r.error : ""));
+            WorkerClient.postCommandResult(ctx, cmd.id, r.ok, r.stdoutTail, r.ms, r.error);
+            record(ctx, cmd, r.ok, r.ms);
             return;
         }
 
@@ -92,6 +121,13 @@ public final class ShellBridge {
             o.put("paired", Store.getBool(ctx, Store.K_SHELL_PAIRED, false));
             o.put("self_test_ok", Store.getBool(ctx, Store.K_SHELL_SELF_TEST_OK, false));
             o.put("on", Store.getBool(ctx, Store.K_SHELL_ON, false));
+            // v1.5 extension pack state (additive; existing consumers
+            // ignore unknown keys).
+            o.put("voice_enabled", Store.getBool(ctx, Store.K_VOICE_ENABLED, false));
+            o.put("voice_active", Store.getBool(ctx, Store.K_VOICE_ACTIVE, false));
+            if (Store.getLong(ctx, Store.K_TORCH_AT, 0) > 0) {
+                o.put("torch_on", Store.getBool(ctx, Store.K_TORCH_ON, false));
+            }
             long at = Store.getLong(ctx, Store.K_SHELL_LAST_AT, 0);
             if (at > 0) {
                 JSONObject last = new JSONObject();

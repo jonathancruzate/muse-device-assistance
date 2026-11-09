@@ -71,6 +71,11 @@ public final class Reconciler {
 
     public static Verdict evaluate(Context ctx) {
         Verdict v = new Verdict();
+        if (DeviceProfile.isTv(ctx)) {
+            v.state = "unknown";
+            v.plan = "tv profile: house-mode ground truth gated off";
+            return finish(ctx, v);
+        }
         String desired = Store.get(ctx, Store.K_DESIRED_MODE, "");
         String gtMode = Store.get(ctx, Store.K_GT_MODE, "");
         String gtRunning = Store.get(ctx, Store.K_GT_RUNNING, "");

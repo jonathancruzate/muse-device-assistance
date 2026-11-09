@@ -33,6 +33,9 @@ public class MainActivity extends Activity {
     private TextView shellView;
     private android.widget.CheckBox shellCheck;
     private boolean syncingShellCheck;
+    private TextView extView;
+    private android.widget.CheckBox voiceCheck;
+    private boolean syncingVoiceCheck;
     private EditText pairAddrField;
     private EditText pairCodeField;
     private TextView actView;
@@ -56,6 +59,12 @@ public class MainActivity extends Activity {
         title.setTextSize(22);
         root.addView(title);
 
+        if (DeviceProfile.isTv(this)) {
+            BridgeLog.log(this, "PROFILE", "tv profile detected: " + DeviceProfile.describe(this));
+            if (!Store.getBool(this, Store.K_SERVICE_ON, false)) {
+                BridgeService.start(this);
+            }
+        }
         TextView sub = new TextView(this);
         sub.setText("Control plane that complements MacroDroid: ground truth, "
                 + "verified acks, drift plans. Shadow by default — Phase 2 "
@@ -220,6 +229,76 @@ public class MainActivity extends Activity {
             refresh();
         });
         root.addView(shellCheck);
+
+        TextView extLabel = new TextView(this);
+        extLabel.setText("\nExtension pack (v1.5) — device controls");
+        extLabel.setTextSize(16);
+        root.addView(extLabel);
+
+        TextView extHint = new TextView(this);
+        extHint.setText("Worker commands can now also launch apps, open "
+                + "navigation, control media + volume, set Do Not Disturb, "
+                + "read the foreground app, and switch the flashlight — "
+                + "all through the same allowlist, nothing free-form.");
+        root.addView(extHint);
+
+        extView = new TextView(this);
+        extView.setTextIsSelectable(true);
+        root.addView(extView);
+
+        root.addView(button("Flashlight ON (test)", v -> {
+            new Thread(() -> {
+                LoopbackAdb.Result r = NativeCommands.execute(this, "torch_on");
+                runOnUiThread(() -> {
+                    toast(r.ok ? "Flashlight on" : "Flashlight failed: " + r.error);
+                    refresh();
+                });
+            }).start();
+        }));
+
+        root.addView(button("Flashlight OFF (test)", v -> {
+            new Thread(() -> {
+                LoopbackAdb.Result r = NativeCommands.execute(this, "torch_off");
+                runOnUiThread(() -> {
+                    toast(r.ok ? "Flashlight off" : "Flashlight failed: " + r.error);
+                    refresh();
+                });
+            }).start();
+        }));
+
+        TextView voiceHint = new TextView(this);
+        voiceHint.setText("\nVoice mode self-activation (optional, OFF by default): "
+                + "lets Muse start/stop Muse voice mode from chat, using the same "
+                + "accessibility tap as the Voice Mode Shortcut app. Two steps, both "
+                + "yours: (1) check the box below, (2) enable this app's accessibility "
+                + "service. While either is off, the voice command is refused — the "
+                + "capability does not exist.");
+        root.addView(voiceHint);
+
+        voiceCheck = new android.widget.CheckBox(this);
+        voiceCheck.setText("Voice module: allow Muse voice-mode start/stop from chat");
+        voiceCheck.setChecked(Store.getBool(this, Store.K_VOICE_ENABLED, false));
+        voiceCheck.setOnCheckedChangeListener((v, checked) -> {
+            if (syncingVoiceCheck) return;
+            Store.put(this, Store.K_VOICE_ENABLED, checked);
+            BridgeLog.log(this, "VOICE", "module " + (checked ? "ENABLED" : "DISABLED") + " from UI");
+            refresh();
+        });
+        root.addView(voiceCheck);
+
+        root.addView(button("Open accessibility settings", v -> {
+            try {
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            } catch (Exception e) {
+                toast("Could not open accessibility settings");
+            }
+        }));
+
+        root.addView(button("Test voice toggle", v -> {
+            LoopbackAdb.Result r = VoiceModeModule.execute(this, "voice_toggle");
+            toast(r.ok ? r.stdoutTail : "Voice toggle refused: " + r.error);
+            refresh();
+        }));
 
         TextView actLabel = new TextView(this);
         actLabel.setText("\nPhase 2 actuation — night mode only, OFF by default");
@@ -415,6 +494,7 @@ public class MainActivity extends Activity {
         int reportCode = (int) Store.getLong(this, Store.K_LAST_REPORT_CODE, 0);
 
         StringBuilder sb = new StringBuilder();
+        sb.append("Profile: ").append(DeviceProfile.describe(this)).append('\n');
         sb.append("Bridge service: ")
           .append(Store.getBool(this, Store.K_SERVICE_ON, false) ? "ON" : "OFF").append('\n');
         sb.append("Worker configured: ").append(Store.workerConfigured(this)).append('\n');
@@ -479,6 +559,32 @@ public class MainActivity extends Activity {
                 syncingShellCheck = true;
                 shellCheck.setChecked(Store.getBool(this, Store.K_SHELL_ON, false));
                 syncingShellCheck = false;
+            }
+        }
+
+        if (extView != null) {
+            StringBuilder ev = new StringBuilder();
+            long torchAt = Store.getLong(this, Store.K_TORCH_AT, 0);
+            ev.append("Flashlight: ");
+            if (torchAt == 0) {
+                ev.append("no state observed yet\n");
+            } else {
+                ev.append(Store.getBool(this, Store.K_TORCH_ON, false) ? "ON" : "OFF")
+                  .append(" (").append(fmt.format(new Date(torchAt))).append(")\n");
+            }
+            ev.append("Voice module enabled: ")
+              .append(Store.getBool(this, Store.K_VOICE_ENABLED, false)).append('\n');
+            ev.append("Voice accessibility service: ")
+              .append(VoiceModeModule.accessibilityEnabled(this) ? "ENABLED" : "not enabled")
+              .append(VoiceModeModule.serviceRunning() ? " · running" : " · not running")
+              .append('\n');
+            ev.append("Voice session believed active: ")
+              .append(Store.getBool(this, Store.K_VOICE_ACTIVE, false)).append('\n');
+            extView.setText(ev.toString());
+            if (voiceCheck != null) {
+                syncingVoiceCheck = true;
+                voiceCheck.setChecked(Store.getBool(this, Store.K_VOICE_ENABLED, false));
+                syncingVoiceCheck = false;
             }
         }
 

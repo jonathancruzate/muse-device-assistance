@@ -73,6 +73,16 @@ public final class Store {
     public static final String K_SHELL_LAST_MS = "shell_last_ms";
     public static final String K_SHELL_LAST_AT = "shell_last_at";
 
+    // v1.5 extension pack — native (on-device) commands.
+    public static final String K_TORCH_ON = "torch_on";       // last torch state from the CameraManager callback
+    public static final String K_TORCH_AT = "torch_at";       // epoch ms of the last torch callback / set
+    // Voice-mode self-activation module (v1.5) — OPTIONAL, OFF by
+    // default; Jonathan enables it in-app. While K_VOICE_ENABLED is
+    // false the voice_mode Worker verb is refused: the capability
+    // does not exist.
+    public static final String K_VOICE_ENABLED = "voice_enabled"; // module switch (default false)
+    public static final String K_VOICE_ACTIVE = "voice_active";   // persisted toggle: voice session believed on
+
     // Tailscale guardian (v1.3.1 detection; v1.3.2 reviver)
     public static final String K_TS_DOWN_SINCE = "ts_down_since";   // epoch ms tailnet first seen down (0 = up)
     public static final String K_TS_LAST_LAUNCH = "ts_last_launch"; // epoch ms of last revive launch attempt
