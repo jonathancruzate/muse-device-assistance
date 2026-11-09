@@ -307,11 +307,58 @@ are the same document — update both in the same handling, always.
   pushed its live registration event, calendar pushed its first
   sync (50 items, the cycle cap), messages/call-log/contacts empty
   (cursor seeding), health empty with the permissions `last_error`.
-  **Channel state: Jonathan flipped Notifications ON in-app
-  ~10:04 EST 2026-11-09 — live-verified pushing (see the Push
-  channels section); every other observer channel stays OFF until
-  he flips it. Phase 2 stays DISARMED; no macro was disabled by
-  Muse.**
+  **Channel state (corrected 2026-11-09 — supersedes the
+  install-time reading in the v1.7 execution doc): Jonathan
+  flipped ALL channels ON in-app on 2026-11-09 (Notifications
+  ~10:04 EST, live-verified pushing; the rest confirmed by him
+  in chat 10:23 EST, and the install-verification report's
+  all-`on:true` read was his flips, not a glitch). The one
+  exception is Health: he turned it back OFF ~10:27 EST by
+  choice — the Health Connect connector already owns health
+  data, so the DA channel was redundant duplication. Final
+  state: every channel ON except Health. Phase 2 stays
+  DISARMED; no macro was disabled by Muse.**
+- **v1.8.0 (versionCode 17) built + deployed + installed
+  2026-11-09** — the Phase 2 expansion (record:
+  `docs/v1.8-phase2-expansion-2026-11-09.md`). `Actuation`
+  generalized from night-only to **all four house modes**
+  (home/away/night/morning) under the unchanged gates: Jonathan's
+  in-app ARM switch, a linked routine per mode, a fresh
+  parse-verified drift verdict, one fire per desired seq per
+  step. Multi-step plans sequence across cycles — the Away latch
+  is toggled OFF as its own verified step before the target
+  fires, never fired over; the drifted-latch ON-then-OFF clear
+  stays un-automated (recorded as blocked). Every cycle now
+  records **shadow evidence** (latest decision, last fire with
+  its verified outcome — verified / not_engaged / superseded —
+  and a capped decision history), carried in every report as a
+  new `actuation` object (the mode-sync Worker gained the
+  sanitizer passthrough, deployed the same handling,
+  preserve-bindings, HTTP 200) — the parity record for retiring
+  MacroDroid Mode Poll (tracked: goal_2b6213617252). Disarmed
+  behavior is byte-for-byte the old shadow: decisions record as
+  `would_fire`, nothing fires. **Nothing was armed, linked, or
+  toggled by this build.** APK
+  `app/Muse-Device-Assistance-1.8.0.apk`, 5,720,148 bytes,
+  SHA-256
+  `f338f956e471a4d569ef973231a288c9e3edff0f6179afa8a3dce372f3870c1a`,
+  same signing cert; build guards + ShellAllowlist gate tests
+  pass (86 checks, ALL_PASS). Installed in place (`install -r`,
+  lastUpdateTime 2026-11-09 10:27:55 EST); BridgeService
+  foreground (foregroundId=1), notification + accessibility
+  grants survived, no crash exits (newest exit is the install
+  kill). **Verification caveat:** the fresh-report read-back
+  (in_sync + `actuation` + push states) is pending the
+  Cloudflare account KV daily write cap resetting at 00:00 UTC
+  2026-11-10 — the cap (API error 10048) was hit ~15:18Z
+  2026-11-09 by the day's push volume and makes every KV-writing
+  Worker handler throw while reads stay live; the deployed
+  Worker code was verified end-to-end locally (report POST →
+  200, `actuation` stored field-for-field). The app keeps
+  cycling and reporting; the first post-reset report carries
+  the evidence. Channel state at install: all ON except Health
+  (OFF by Jonathan's choice ~10:27 EST — see the v1.7 bullet's
+  correction).
 - minSdk 29 / targetSdk 35. Framework-only app code, raw
   javac/d8/aapt2 build (`cd app && ./build.sh`); the build **fails** if
   any app class is missing from the dex or the dex references any
@@ -496,16 +543,20 @@ every recovery needed manual phone-side steps.
   (the guardian design it supersedes:
   `docs/tailscale-guardian-2026-11-03.md`).
 
-## Phase 2 actuation — shipped DISARMED (v1.3.0 machinery, in 1.3.2)
+## Phase 2 actuation — shipped DISARMED (v1.3.0 machinery; all house modes since v1.8.0)
 
 The first rung of replacing MacroDroid's mode macros: the bridge can
-fire a routine itself — behind gates, **night mode only, OFF by
-default**. The shipped state was verified disarmed at v1.3.0 install:
-`armed=false` and no routines linked, so no fire was possible. The
-current on-device armed/linked state in v1.3.2 is **unverified from
-the repo alone** — read it from the app's Phase 2 section or a fresh
-situation check before assuming it; never assume it changed, and
-never assume it didn't.
+fire a routine itself — behind gates, **OFF by default**. v1.3.0
+shipped it night-only; **v1.8.0 (2026-11-09) generalized the gate to
+all four house modes** (home/away/night/morning) with the same
+discipline, and added per-cycle shadow evidence to every report
+(see the gate bullet below). The shipped state was verified disarmed
+at v1.3.0 install: `armed=false` and no routines linked, so no fire
+was possible. The current on-device armed/linked state is
+**unverified from the repo alone** — since v1.8.0 it is readable
+from the report's `actuation` object (`armed`, per-mode `linked`
+names) or the app's Phase 2 section; read one of those before
+assuming it; never assume it changed, and never assume it didn't.
 
 - **Firing is capture-based (`RoutineFirer`).** The
   `RoutineLaunchActivity` extras contract was never decompiled, so the
@@ -516,16 +567,36 @@ never assume it didn't.
   and stores the minted launch intent (URI form) in on-device prefs
   only; firing replays exactly that intent. If the picker returns no
   shortcut intent, linking logs loudly and Phase 2 stops there.
-- **Actuation gate (`Actuation`) — fires only when ALL hold:** the UI
-  arm switch is ON (Store `act_armed`, **default OFF**) · desired is
-  `night` · verdict is `drift` on a fresh, parse-verified dump · that
-  desired `seq` has not already been fired for · the Away latch is NOT
-  running (the latch-clear sequence is out of v1.3 scope — logs
-  throttled, does not fire) · the Night (Switch Sleep mode) routine is
-  linked. A fire that fails to engage shows as continued drift in the
-  next report; it is **never auto-retried for the same sequence**.
-  Home / Morning / Away links exist in the UI, but they stay shadow —
-  night is the only actuation scope.
+- **Actuation gate (`Actuation`, v1.8.0 scope) — fires only when
+  ALL hold:** the UI arm switch is ON (Store `act_armed`, **default
+  OFF**) · desired is a house mode (home/away/night/morning) ·
+  verdict is `drift` on a fresh, parse-verified dump · that step
+  has not already been fired for this desired `seq` (once per seq
+  per step) · the routine for the step's mode is linked. Multi-step
+  plans sequence across cycles, one fire per cycle, each step
+  verified against a fresh dump before the next: a running Away
+  latch is toggled OFF first (its own once-per-seq fire) and the
+  target fires only once a fresh dump shows the latch gone — never
+  fired over a held latch, and a latch that survives its toggle on
+  a fresh dump **blocks** the sequence (recorded, throttled log).
+  The drifted-latch clear (mode reads active, its switch routine
+  not running) is two blind toggles and stays **un-automated** —
+  recorded as a blocked decision. A fire that fails to engage
+  resolves its outcome to `not_engaged` (fresh dump, still drift)
+  and is **never auto-retried for the same sequence**. (v1.3.0's
+  original scope was night-only with the Away latch blocking
+  outright; the gates above supersede it.)
+- **Shadow evidence (v1.8.0, in every report's `actuation`
+  object):** `armed`, `linked` (routine name per mode, `""` = not
+  linked), `shadow` — the latest cycle's decision `{seq, desired,
+  observed, verdict, armed, action, step, target, routine,
+  reason}` where action ∈ none / would_fire / fired /
+  awaiting_verify / blocked — `last_fire` with its outcome
+  (pending / verified / not_engaged / superseded), and a capped
+  `history` of decision changes. It is produced armed or not, so
+  the shadow diff against MacroDroid Mode Poll (tracked:
+  goal_2b6213617252) needs no arming: compare the report's
+  decisions against observed ground truth per mode change.
 - **Gates to live firing, in order** (runbook:
   `docs/phase2-actuation-2026-11-03.md`): (1) **Link Night — Jonathan,
   at the phone** (~30 s: "Link routine: Night (Switch Sleep mode)" →
@@ -539,6 +610,13 @@ never assume it didn't.
   installed and untouched the whole time — **unarming (one checkbox)
   is the full rollback**, and the macros remain the fallback for a
   month per the investigation plan.
+  **v1.8.0 addendum (2026-11-09):** the same gate order now applies
+  per mode — link each mode's routine (all four link buttons already
+  exist in the Phase 2 section), let the shadow evidence in the
+  report's `actuation` object accumulate across real mode changes
+  (goal_2b6213617252), and the one ARM checkbox covers every linked
+  mode. Nothing about the order changes: link → shadow-diff → arm,
+  all Jonathan's in-app acts.
 
 ## How Muse interacts — the lanes
 
@@ -566,7 +644,8 @@ the ADB self-heal checkbox, the Phase 2 section (arm checkbox, link
 buttons, test-fire, linked/armed/last-fired-seq status), and the log
 tail. The foreground notification mirrors the live line: observed mode
 · desired · verdict · `(shadow — observing only)` or
-`(Phase 2 ARMED — night only)`.
+`(Phase 2 ARMED)` (v1.8.0 wording; pre-v1.8 builds read
+`(Phase 2 ARMED — night only)`).
 
 **Checking state (Muse's read path, in order).**
 
@@ -904,7 +983,12 @@ channel**.
     the Low Battery Alert macro.
 - **LIVE observers since v1.7.0** (record:
   `docs/v1.7-push-observers-2026-11-09.md`) — real code behind the
-  toggles, **all still OFF until Jonathan flips them**:
+  toggles. **Channel state (confirmed 2026-11-09): Jonathan turned
+  every channel ON in-app that morning; the sole exception is
+  Health, turned back OFF ~10:27 EST by his choice** (the Health
+  Connect connector already owns health data — the DA channel was
+  redundant duplication). Current state lives in each report's
+  `push_channels`; never assume it — read it:
   - *Calendar* (`phone-calendar`): ContentObserver on the Events
     URI; rows with `DTSTART`/`DTEND` at/after the cursor push as
     `{id, title, start, end, location, all_day}`, cap 50/cycle.
@@ -928,6 +1012,10 @@ channel**.
     next token stored only on 2xx. Grants live in the Health
     Connect app — with none granted, the channel's `last_error`
     says so (verified live) instead of pretending to push.
+    **Channel state: OFF since ~10:27 EST 2026-11-09, Jonathan's
+    choice** (health data already flows via the Health Connect
+    connector; see the state note above). The observer code stays
+    live behind the toggle if he ever flips it back.
   Observers check their runtime permission at registration and
   set `last_error` if missing — never crash. Cursors advance
   only on PushClient 2xx; failures land in `last_error` +
@@ -985,9 +1073,13 @@ channel**.
   (`docs/execution-2026-11-08.md`), and that day's reports still
   showed Phase 2 in shadow ("(shadow: not fired)"), consistent with
   DISARMED and nothing linked — but the arm/link state is Jonathan's
-  in-app state: read it from the app's Phase 2 section or a fresh
-  situation check before assuming it, and never change it from
-  Muse's side.
+  in-app state: read it from the app's Phase 2 section or, since
+  v1.8.0, from the report's `actuation` object before assuming it,
+  and never change it from Muse's side. (The first v1.8 report
+  read-back was still pending at that build's snapshot time — the
+  Cloudflare KV daily write cap blocked all report writes from
+  ~15:18Z 2026-11-09 until the 00:00 UTC reset; see
+  `docs/v1.8-phase2-expansion-2026-11-09.md`.)
 - The deliberate Tailscale off/on episode test for the v1.3.2 reviver
   was **pending at snapshot time** — revival is designed and
   report-verified in shape, not yet episode-proven on record.

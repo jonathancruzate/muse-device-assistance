@@ -60,6 +60,22 @@ public final class Store {
     public static final String K_ACT_FIRED_SEQ = "act_fired_seq";   // desired seq already fired for
     public static final String K_ACT_LAST_LOG = "act_last_log";     // throttle for repeated actuation logs
 
+    // Phase 2 expansion (v1.8) — all house modes. The Away-latch clear
+    // is its own once-per-seq fire, sequenced BEFORE the target fire;
+    // its markers mirror the target fire's.
+    public static final String K_ACT_AWAY_CLEAR_SEQ = "act_away_clear_seq";
+    public static final String K_ACT_AWAY_CLEAR_AT = "act_away_clear_at";
+    public static final String K_ACT_AWAY_CLEAR_GT = "act_away_clear_gt"; // gt_at when the clear fired
+    public static final String K_ACT_FIRED_AT = "act_fired_at";           // epoch ms of the last target fire
+    public static final String K_ACT_FIRED_GT = "act_fired_gt";           // gt_at when the last target fired
+    // Shadow-evidence records (v1.8): the latest per-cycle decision,
+    // the last real fire with its verified outcome, and a capped
+    // decision history — JSON strings, carried in every report so
+    // parity with MacroDroid Mode Poll is provable from the outside.
+    public static final String K_ACT_SHADOW = "act_shadow_json";
+    public static final String K_ACT_LAST_FIRE = "act_last_fire_json";
+    public static final String K_ACT_HISTORY = "act_history_json";
+
     // Loopback shell bridge (v1.4) — in-app pairing with the phone's own
     // wireless debugging; allowlisted commands pulled from the Worker.
     // The RSA key + cert live in app-private FILES (LoopbackAdb), never

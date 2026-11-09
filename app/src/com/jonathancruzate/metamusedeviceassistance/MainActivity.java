@@ -338,15 +338,18 @@ public class MainActivity extends Activity {
         }
 
         TextView actLabel = new TextView(this);
-        actLabel.setText("\nPhase 2 actuation — night mode only, OFF by default");
+        actLabel.setText("\nPhase 2 actuation — all house modes, OFF by default");
         actLabel.setTextSize(16);
         root.addView(actLabel);
 
         TextView actHint = new TextView(this);
         actHint.setText("Linking opens Samsung's routine picker — pick the matching "
                 + "Switch routine once; its launch shortcut is stored on this phone "
-                + "only. Arming lets the bridge fire Night itself when the Worker "
-                + "asks and a fresh dump shows drift (once per request).");
+                + "only. Arming lets the bridge fire the linked routine itself when "
+                + "the Worker asks for any house mode and a fresh dump shows drift "
+                + "(one fire per step per request; the Away latch is cleared first, "
+                + "never fired over). Disarmed, the bridge only records what it "
+                + "would fire — that shadow record is in every report.");
         root.addView(actHint);
 
         actView = new TextView(this);
@@ -354,7 +357,7 @@ public class MainActivity extends Activity {
         root.addView(actView);
 
         armCheck = new android.widget.CheckBox(this);
-        armCheck.setText("ARM Phase 2: fire the Night routine on drift (all other modes stay shadow)");
+        armCheck.setText("ARM Phase 2: fire linked routines on drift (Home / Away / Night / Morning)");
         armCheck.setChecked(Store.getBool(this, Store.K_ACT_ARMED, false));
         armCheck.setOnCheckedChangeListener((v, checked) -> {
             Store.put(this, Store.K_ACT_ARMED, checked);

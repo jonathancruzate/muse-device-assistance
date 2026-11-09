@@ -130,6 +130,13 @@ public final class WorkerClient {
             // last error, so Muse can see the state he set (design §4).
             // On TV every channel reports on=false (profile gate).
             body.put("push_channels", PushChannels.snapshot(ctx));
+            // v1.8: Phase 2 actuation + shadow evidence — armed state,
+            // per-mode routine links, the latest would-fire/did-fire
+            // decision, the last fire's verified outcome, and the
+            // decision history. This is the parity record against
+            // MacroDroid Mode Poll (goal_2b6213617252). Phone only:
+            // the TV profile never runs the reconciler.
+            if (!tv) body.put("actuation", Actuation.snapshot(ctx));
             body.put("adb", AdbBridge.snapshot(ctx));
             body.put("tailscale", TailscaleGuard.snapshot(ctx));
             body.put("shell_bridge", ShellBridge.snapshot(ctx));

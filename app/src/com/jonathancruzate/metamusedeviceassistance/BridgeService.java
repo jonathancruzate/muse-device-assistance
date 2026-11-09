@@ -22,7 +22,9 @@ import android.os.IBinder;
  *
  * SHADOW MODE by default: the service observes, verifies, plans, and
  * reports. Since v1.3.0 it can fire — only through Actuation's gate
- * (armed in the UI, night mode only, once per desired sequence).
+ * (armed in the UI, once per desired sequence per step); v1.8.0
+ * widened that gate from night-only to all four house modes, and
+ * every cycle's decision is recorded as shadow evidence either way.
  */
 public class BridgeService extends Service {
     private static final String CHANNEL = "bridge";
@@ -146,7 +148,7 @@ public class BridgeService extends Service {
                 ShellBridge.tick(this);
             }
             Reconciler.Verdict v = Reconciler.evaluate(this);
-            Actuation.maybeAct(this, v);
+            Actuation.cycle(this, v);
             // v1.6 push channels: Low Battery crossing latch + retry of
             // any queued push payloads. Both are no-ops when their
             // channel is OFF / the queue is empty, and both are gated
@@ -191,7 +193,7 @@ public class BridgeService extends Service {
         String desired = Store.get(this, Store.K_DESIRED_MODE, "?");
         boolean armed = Store.getBool(this, Store.K_ACT_ARMED, false);
         String text = "Mode: " + mode + " · Desired: " + desired + " · " + v.state
-                + (armed ? " (Phase 2 ARMED — night only)" : " (shadow — observing only)");
+                + (armed ? " (Phase 2 ARMED)" : " (shadow — observing only)");
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (nm != null) nm.notify(1, statusNotification(text));
     }

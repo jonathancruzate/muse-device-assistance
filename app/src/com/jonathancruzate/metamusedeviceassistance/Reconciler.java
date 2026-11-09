@@ -147,7 +147,7 @@ public final class Reconciler {
         return finish(ctx, v);
     }
 
-    private static boolean runningNamesMode(String running, String mode) {
+    static boolean runningNamesMode(String running, String mode) {
         if (running == null || running.isEmpty()) return false;
         String low = running.toLowerCase();
         String m = mode.toLowerCase();
