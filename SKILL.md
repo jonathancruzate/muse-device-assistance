@@ -522,6 +522,24 @@ tail. The foreground notification mirrors the live line: observed mode
    `adb` + `tailscale` objects first (fresh port, tailnet up/down) —
    that is what the bridge exists to tell you.
 
+**Reading live context (2026-11-09).** When a decision needs what
+Jonathan is doing *right now* — which channel to reach him on,
+whether he can be interrupted, whether the phone can survive a heavy
+task — read context in this order: (1) the latest Worker report
+above (its age first: fresh is ~15 min heartbeat / 30 min ground
+truth; older is **unknown state**, never act on it as current);
+(2) if the decision turns on what he's doing on the phone, fire
+`screen_foreground` through the Worker command channel — **singly**,
+per the one-command-per-fetch rule — and read the result back
+(foreground package/activity only, never screen content). A media
+transport read (`media_volume_get` / session state) completes the
+driving signature when navigation is in the foreground. The
+**judgment rules that consume these reads** — channel choice,
+interruptibility, pre-flight, phone-forgotten — live in the
+`local-proactive-intervention` skill's **Context engine** section;
+that section is their only home. This skill owns the fetch
+mechanics; it does not restate the rules.
+
 **Publishing desired state.** Muse's side of the contract is the
 Worker's `desired {mode, seq}` (the mode-sync system owns publishing;
 the bridge only consumes it and reports back). Bump `seq` for a new
