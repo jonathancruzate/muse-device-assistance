@@ -34,6 +34,7 @@ public class BridgeService extends Service {
     private Handler handler;
     private long lastReportedGtAt = -1;
     private String lastReportedVerdict = "";
+    private PushObservers pushObservers;
 
     public static void start(Context ctx) {
         Store.put(ctx, Store.K_SERVICE_ON, true);
@@ -88,6 +89,11 @@ public class BridgeService extends Service {
         handler = new Handler(thread.getLooper());
         BridgeLog.log(this, "SERVICE", "created profile=" + DeviceProfile.describe(this));
         AdbBridge.startDiscovery(this);
+        // v1.7 push observers: ContentObservers + dialer callback,
+        // registered on this service's handler thread, gated per
+        // channel toggle inside PushObservers (no-op on TV).
+        pushObservers = new PushObservers(this, handler);
+        pushObservers.start();
         handler.post(this::cycle);
     }
 
@@ -117,6 +123,7 @@ public class BridgeService extends Service {
     @Override
     public void onDestroy() {
         BridgeLog.log(this, "SERVICE", "destroyed");
+        if (pushObservers != null) pushObservers.stop();
         LoopbackAdb.close(this);
         if (handler != null) handler.removeCallbacksAndMessages(null);
         if (thread != null) thread.quitSafely();
@@ -140,6 +147,19 @@ public class BridgeService extends Service {
             }
             Reconciler.Verdict v = Reconciler.evaluate(this);
             Actuation.maybeAct(this, v);
+            // v1.6 push channels: Low Battery crossing latch + retry of
+            // any queued push payloads. Both are no-ops when their
+            // channel is OFF / the queue is empty, and both are gated
+            // off on TV inside PushChannels/PushClient.
+            if (!tv) {
+                BatteryPush.check(this);
+                // v1.7: observer diffs (calendar/contacts/messages/
+                // call log; dialer pushes live from its callback) +
+                // the throttled Health Connect change-log check.
+                if (pushObservers != null) pushObservers.syncDirty();
+                HealthPush.check(this);
+                PushClient.flushQueue(this);
+            }
             long gtAt = Store.getLong(this, Store.K_GT_AT, 0);
             long lastReport = Store.getLong(this, Store.K_LAST_REPORT_AT, 0);
             boolean changed = gtAt != lastReportedGtAt || !v.state.equals(lastReportedVerdict);

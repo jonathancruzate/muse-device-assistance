@@ -36,6 +36,9 @@ public class MainActivity extends Activity {
     private TextView extView;
     private android.widget.CheckBox voiceCheck;
     private boolean syncingVoiceCheck;
+    private TextView pushView;
+    private android.widget.CheckBox[] pushChecks;
+    private boolean syncingPushCheck;
     private EditText pairAddrField;
     private EditText pairCodeField;
     private TextView actView;
@@ -300,6 +303,40 @@ public class MainActivity extends Activity {
             refresh();
         }));
 
+        TextView pushLabel = new TextView(this);
+        pushLabel.setText("\nPush channels — this device → Muse (you control each one)");
+        pushLabel.setTextSize(16);
+        root.addView(pushLabel);
+
+        TextView pushHint = new TextView(this);
+        pushHint.setText("Each channel, when ON, pushes changes from this "
+                + "device to Muse as they happen — no pulling. OFF means "
+                + "not registered, not read, not pushed. All default OFF "
+                + "except Mode reconcile (the bridge's existing loop). "
+                + "Live since v1.7: Notifications, Low Battery, Calendar, "
+                + "Contacts, Messages, Phone dialer, Call Log, and Health "
+                + "Connect (change-log). On TV every channel is gated off.");
+        root.addView(pushHint);
+
+        pushView = new TextView(this);
+        pushView.setTextIsSelectable(true);
+        root.addView(pushView);
+
+        pushChecks = new android.widget.CheckBox[PushChannels.ALL.length];
+        for (int i = 0; i < PushChannels.ALL.length; i++) {
+            final PushChannels.Channel ch = PushChannels.ALL[i];
+            android.widget.CheckBox cb = new android.widget.CheckBox(this);
+            cb.setText(ch.label);
+            cb.setChecked(Store.getBool(this, ch.toggleKey, ch.defaultOn));
+            if (DeviceProfile.isTv(this)) cb.setEnabled(false);
+            cb.setOnCheckedChangeListener((v, checked) -> {
+                if (syncingPushCheck) return;
+                onPushToggled(ch, checked);
+            });
+            pushChecks[i] = cb;
+            root.addView(cb);
+        }
+
         TextView actLabel = new TextView(this);
         actLabel.setText("\nPhase 2 actuation — night mode only, OFF by default");
         actLabel.setTextSize(16);
@@ -469,6 +506,70 @@ public class MainActivity extends Activity {
         refresh();
     }
 
+    /**
+     * Push-channel toggle handler (v1.6, design §4) — follows the
+     * voiceCheck/shellCheck pattern: Store.put, a BridgeLog line, and a
+     * refresh. Turning a channel ON also jumps its cursor to now (no
+     * historical dump without asking) and starts its permission flow:
+     * Notifications is already granted (status only); Calendar /
+     * Contacts / Messages / Dialer / Call Log request their runtime
+     * permission here (their observers are v1.7 — toggle + Store + log
+     * + permission is the whole v1.6 surface for them); Health Connect
+     * grants live in the Health Connect app, stubbed with a toast.
+     */
+    private void onPushToggled(PushChannels.Channel ch, boolean checked) {
+        if (DeviceProfile.isTv(this)) {
+            toast("Push channels are gated off on TV");
+            refresh();
+            return;
+        }
+        Store.put(this, ch.toggleKey, checked);
+        BridgeLog.log(this, "PUSH", "channel " + ch.id + " "
+                + (checked ? "ON" : "OFF") + " from UI");
+        if (checked) {
+            Store.put(this, ch.cursorKey, System.currentTimeMillis());
+            switch (ch.id) {
+                case "notifications": {
+                    String listeners = Settings.Secure.getString(getContentResolver(),
+                            "enabled_notification_listeners");
+                    boolean granted = listeners != null
+                            && listeners.contains(getPackageName());
+                    toast(granted
+                            ? "Notifications: notification access already granted"
+                            : "Notifications: grant notification access (button above)");
+                    BridgeLog.log(this, "PUSH", "notifications access "
+                            + (granted ? "already granted" : "NOT granted"));
+                    break;
+                }
+                case "calendar":
+                    requestPermissions(new String[]{android.Manifest.permission.READ_CALENDAR}, 71);
+                    break;
+                case "contacts":
+                    requestPermissions(new String[]{android.Manifest.permission.READ_CONTACTS}, 72);
+                    break;
+                case "messages":
+                    requestPermissions(new String[]{
+                            android.Manifest.permission.READ_SMS,
+                            android.Manifest.permission.RECEIVE_SMS}, 73);
+                    break;
+                case "dialer":
+                    requestPermissions(new String[]{android.Manifest.permission.READ_PHONE_STATE}, 74);
+                    break;
+                case "call_log":
+                    requestPermissions(new String[]{android.Manifest.permission.READ_CALL_LOG}, 75);
+                    break;
+                case "health":
+                    toast("Health Connect: per-type grants are in the Health Connect app");
+                    BridgeLog.log(this, "PUSH", "health channel ON: Health Connect grants are user-managed in the HC app (v1.7 change-log observer)");
+                    break;
+                default:
+                    // battery + mode_reconcile need no permission.
+                    break;
+            }
+        }
+        refresh();
+    }
+
     private Button button(String label, View.OnClickListener onClick) {
         Button b = new Button(this);
         b.setText(label);
@@ -585,6 +686,30 @@ public class MainActivity extends Activity {
                 syncingVoiceCheck = true;
                 voiceCheck.setChecked(Store.getBool(this, Store.K_VOICE_ENABLED, false));
                 syncingVoiceCheck = false;
+            }
+        }
+
+        if (pushView != null) {
+            StringBuilder pv = new StringBuilder();
+            boolean tv = DeviceProfile.isTv(this);
+            for (PushChannels.Channel ch : PushChannels.ALL) {
+                long lp = Store.getLong(this, ch.lastPushKey, 0);
+                String err = Store.get(this, ch.lastErrorKey, "");
+                pv.append(ch.label).append(": ")
+                  .append(tv ? "OFF (TV gated)" : (Store.getBool(this, ch.toggleKey, ch.defaultOn) ? "ON" : "OFF"))
+                  .append(" · last push ").append(lp == 0 ? "never" : fmt.format(new Date(lp)));
+                if (err != null && !err.isEmpty()) pv.append(" · last error: ").append(err);
+                pv.append('\n');
+            }
+            pv.append("Queued retries: ").append(PushClient.queueSize(this)).append('\n');
+            pushView.setText(pv.toString());
+            if (pushChecks != null) {
+                syncingPushCheck = true;
+                for (int i = 0; i < PushChannels.ALL.length && i < pushChecks.length; i++) {
+                    PushChannels.Channel ch = PushChannels.ALL[i];
+                    pushChecks[i].setChecked(Store.getBool(this, ch.toggleKey, ch.defaultOn));
+                }
+                syncingPushCheck = false;
             }
         }
 

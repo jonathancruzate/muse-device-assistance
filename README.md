@@ -517,3 +517,74 @@ actuation is untouched and still defaults DISARMED.
   same cert; installed 2026-11-08 23:40:49 EST in place; pairing
   + self-test survived (post-install report verified). Full
   record: `docs/execution-2026-11-08.md` section (k).
+
+## v1.6.0 — Local push channels, first slice (2026-11-09)
+
+- v1.6.0 (versionCode 15): nine user-controlled push channels —
+  Store keys + a `PushChannels` registry, a MainActivity toggle
+  section ("you control each one"), and `PushClient` posting
+  `{base}/device-push` on the mode-sync Worker (same base + secret
+  the app already holds; the Worker gained POST/GET /device-push
+  with sanitized per-source KV queues + a `push_channels` report
+  passthrough, deployed in the same handling). LIVE observers:
+  Notifications forwarding in GroundTruthListener (every package,
+  posted AND removed, source phone-notify — replaces MacroDroid
+  Notify Push) and the Low Battery 20% latch in BatteryPush
+  (source phone-battery — replaces Low Battery Alert); both ship
+  with their toggles OFF (Jonathan's to flip). Calendar / Contacts
+  / Messages / Dialer / Call Log / Health Connect are toggle +
+  permission-ask stubs; their observers are v1.7. Reports carry
+  `push_channels {on, last_push_at, last_error}` per channel.
+  Build guards + ShellAllowlist gate tests pass. APK
+  `app/Muse-Device-Assistance-1.6.0.apk`, 5,711,956 bytes,
+  SHA-256
+  `fd84d5fd46525ce8226dd5ed739cf19c505355a603e879b8d1c3597d5d97827e`,
+  same cert; installed 2026-11-09 09:49:00 EST in place; pairing,
+  self-test, voice state and grants survived; post-install report
+  verified push_channels at defaults, BridgeService foreground,
+  no post-install crashes. Full record:
+  `docs/v1.6-push-channels-2026-11-09.md`.
+
+## v1.7.0 — Push observers: the v1.6 stubs made real (2026-11-09)
+
+- v1.7.0 (versionCode 16): the six stubbed channels get real
+  observers behind the existing toggles. New `PushObservers`
+  (BridgeService-owned; ContentObservers mark channels dirty, the
+  60-s cycle syncs): Calendar (Events query at/after cursor, cap
+  50, source phone-calendar), Contacts (last-updated cursor,
+  phone-contacts), Messages (separate SMS/MMS row-id cursors
+  seeded to the current max — no historical dump, phone-messages),
+  Call Log (row-id cursor, phone-calllog), Dialer
+  (TelephonyCallback registered only while ON, phone-dialer —
+  platform limit: the API-35 listener delivers state only, so
+  `number` is currently ""). Health Connect is LIVE in new
+  `HealthPush`: the android-35 platform jar already carries the
+  framework HC change-log APIs, so no new dependency — one token
+  for Sleep/Steps/HeartRate/Exercise, 15-min throttle, token
+  stored only on a 2xx push, and no HC permissions granted ->
+  the channel `last_error` says so (source phone-health).
+  Universal rules: toggle OFF = unregistered / not read / not
+  pushed; cursors advance only on PushClient 2xx; failures land
+  in the channel `last_error` + BridgeLog; missing permission at
+  registration sets `last_error`, never crashes. No Worker change
+  (the v1.6 sanitizer already accepts these sources). Build
+  guards + ShellAllowlist gate tests pass. APK
+  `app/Muse-Device-Assistance-1.7.0.apk`, 5,716,052 bytes,
+  SHA-256
+  `89147ee36961e139a95f178f7a424a6fa433def55322daec35dc7768f1e1b5bd`,
+  same cert; installed 2026-11-09 10:10:55 EST in place; pairing,
+  self-test, voice state and grants survived; post-install report
+  in_sync with `shell_bridge` unchanged and no crashes. Queue
+  read-backs: dialer pushed its live registration event, calendar
+  pushed its first sync (50 items, the cycle cap), messages /
+  call-log / contacts empty (cursor seeding), health empty with
+  the permissions `last_error`. Channel state: Jonathan flipped
+  Notifications ON in-app ~10:04 EST 2026-11-09 — live-verified
+  pushing posted AND removed events from 15:04:43Z (111 items
+  queued at read-back); MacroDroid's Notify Push macro is
+  superseded by the app channel and retired — Jonathan disabled
+  it on-phone ~10:16 EST 2026-11-09 (last MacroDroid push
+  15:14:11Z, app pushes continued past 15:16Z), and the legacy
+  `phone-notify-drain` lane retires with it. Every other observer
+  channel stays OFF until Jonathan flips it. Phase 2 DISARMED.
+  Full record: `docs/v1.7-push-observers-2026-11-09.md`.

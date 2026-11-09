@@ -247,6 +247,71 @@ are the same document — update both in the same handling, always.
   report carries `shell_bridge {paired:true, self_test_ok:true,
   on:true}` — pairing and self-test survived. Phase 2 DISARMED,
   untouched.
+- **v1.6.0 (versionCode 15) built + deployed + installed
+  2026-11-09** — the local push replacement, first slice (design:
+  `docs/local-push-replacement-v1.6-design-2026-11-09.md`; record:
+  `docs/v1.6-push-channels-2026-11-09.md`). Nine user-controlled
+  **push channels** (see the Push channels section below): Store
+  keys + a `PushChannels` registry, a MainActivity toggle section,
+  `PushClient` (POST `{base}/device-push` on the mode-sync Worker —
+  the Worker home was chosen so the app needs no second base/secret),
+  the LIVE Notifications forwarding in `GroundTruthListener` and the
+  LIVE Low Battery latch in `BatteryPush`, and a `push_channels`
+  object in every report. The mode-sync Worker gained
+  `/device-push` (POST + GET read-back, sanitized per-source KV
+  queues) and the `push_channels` sanitizer passthrough, deployed
+  the same handling (preserve-bindings lane, HTTP 200). APK
+  `app/Muse-Device-Assistance-1.6.0.apk`, 5,711,956 bytes,
+  SHA-256
+  `fd84d5fd46525ce8226dd5ed739cf19c505355a603e879b8d1c3597d5d97827e`,
+  same signing cert; build guards + ShellAllowlist gate tests pass.
+  Installed in place (`install -r`, lastUpdateTime 2026-11-09
+  09:49:00 EST); pairing, self-test, voice state, notification +
+  accessibility grants all survived (fresh report 14:59Z:
+  `shell_bridge` unchanged, `push_channels` at defaults — every
+  channel OFF except mode_reconcile ON). BridgeService needed a
+  shell start-foreground-service after the update killed the sticky
+  service; it came up foreground (foregroundId=1) and the newest
+  exit-info record is the PACKAGE UPDATED exit itself — no crashes.
+  **No channel was turned ON and Phase 2 stays DISARMED** — toggles
+  are Jonathan's.
+- **v1.7.0 (versionCode 16) built + deployed + installed
+  2026-11-09** — the push observers stubbed in v1.6 are now real
+  (record: `docs/v1.7-push-observers-2026-11-09.md`). New
+  `PushObservers` (BridgeService-owned; ContentObservers mark
+  channels dirty, the 60-s cycle syncs): **Calendar**
+  (`phone-calendar`, Events query at/after cursor, cap 50),
+  **Contacts** (`phone-contacts`, last-updated cursor), **Messages**
+  (`phone-messages`, separate SMS/MMS row-id cursors, seeded to the
+  current max — no historical dump), **Call Log** (`phone-calllog`,
+  row-id cursor), **Dialer** (`phone-dialer`, TelephonyCallback
+  registered only while ON — platform limit: the API-35 listener
+  delivers state only, so `number` is currently `""`), and
+  **Health Connect LIVE** in `HealthPush` — the android-35 platform
+  jar already carries the framework HC change-log APIs, so no new
+  dependency; one token for Sleep/Steps/HeartRate/Exercise, 15-min
+  throttle, token stored only on 2xx, and no HC permissions →
+  `last_error` set loud (verified live in the first report).
+  Universal rules hold: toggle OFF = unregistered / not read / not
+  pushed; cursors advance only on PushClient 2xx; failures land in
+  the channel `last_error` + BridgeLog. **No Worker change** — the
+  v1.6 sanitizer already accepts these sources. APK
+  `app/Muse-Device-Assistance-1.7.0.apk`, 5,716,052 bytes,
+  SHA-256
+  `89147ee36961e139a95f178f7a424a6fa433def55322daec35dc7768f1e1b5bd`,
+  same signing cert; build guards + ShellAllowlist gate tests pass.
+  Installed in place (`install -r`, lastUpdateTime 2026-11-09
+  10:10:55 EST); pairing, self-test, voice state, notification +
+  accessibility grants all survived; newest exit is the PACKAGE
+  UPDATED exit — no crashes. Post-install queue read-backs: dialer
+  pushed its live registration event, calendar pushed its first
+  sync (50 items, the cycle cap), messages/call-log/contacts empty
+  (cursor seeding), health empty with the permissions `last_error`.
+  **Channel state: Jonathan flipped Notifications ON in-app
+  ~10:04 EST 2026-11-09 — live-verified pushing (see the Push
+  channels section); every other observer channel stays OFF until
+  he flips it. Phase 2 stays DISARMED; no macro was disabled by
+  Muse.**
 - minSdk 29 / targetSdk 35. Framework-only app code, raw
   javac/d8/aapt2 build (`cd app && ./build.sh`); the build **fails** if
   any app class is missing from the dex or the dex references any
@@ -782,6 +847,103 @@ long-press or the widget.
   sessions; off→on clean). The MacroDroid route for Muse-initiated spoken contact
   is deprecated in its favor (see the phone-automations skill,
   2026-11-08 note).
+
+## Push channels — local push replacement (v1.6.0 contract; v1.7.0 observers LIVE, toggles Jonathan's)
+
+Jonathan's 2026-11-09 orders: replace the rest of MacroDroid
+*locally* (no third-party endpoints), turn notifications — and the
+other "From this device" pulls (Calendar, Contacts, Messages, Phone
+dialer, Call Log, Health Connect) — into **push** instead of
+Muse pulling them with tokens, **with user control for each
+channel**.
+
+- **The toggles are the contract.** MainActivity's "Push channels —
+  this device → Muse (you control each one)" section has one
+  checkbox per channel (Store keys `push_notifications`,
+  `push_calendar`, `push_contacts`, `push_messages`, `push_dialer`,
+  `push_call_log`, `push_health`, `push_battery` — all **default
+  OFF** — and `push_mode_reconcile`, **default ON** as the bridge's
+  existing loop). OFF means not registered, not read, not pushed.
+  Muse **never flips a push toggle** — same discipline as the
+  Phase 2 arm switch. Read the state from the report's
+  `push_channels` object (`{on, last_push_at, last_error}` per
+  channel) instead of asking Jonathan. TV profile: all channels
+  gated OFF.
+- **Transport (`PushClient`).** `POST {base}/device-push?secret=…`,
+  JSON `{source, ts, items[]}`, on the **mode-sync Worker** (chosen
+  over phone-ingress so the app's one existing base + secret serves
+  it — no second on-device config). The Worker sanitizes items
+  field-by-field into per-source KV queues `devicepush:<source>`
+  (cap 500; GET `/device-push?source=…` is the authed read-back /
+  future drain contract). On-device, a channel's cursor/last-push
+  advance **only on HTTP 2xx**; failures land in the channel's
+  `last_error` + an in-prefs retry queue retried each bridge cycle
+  (payloads for a since-disabled channel are dropped, never pushed
+  behind the toggle).
+- **LIVE observers (code shipped + installed):**
+  - *Notifications* (`phone-notify`): **ON — flipped by Jonathan
+    in-app ~10:04 EST 2026-11-09 and live-verified pushing**
+    (posted AND removed events verified from
+    2026-11-09T15:04:43Z; queue read-back later that morning: 111
+    items, still landing live). `GroundTruthListener` forwards
+    every package's **posted AND removed** notifications
+    (`{package, title, text, big_text, posted_at, event, key}`)
+    after the unchanged Routines ground-truth path. This replaces
+    MacroDroid's Notify Push macro 1:1 and adds the CLEARED events
+    it never had. **MacroDroid's Notify Push macro is superseded
+    by this channel and retired: Jonathan disabled it on-phone
+    ~10:16 EST 2026-11-09** (his "Done" in chat; lanes corroborate
+    — last MacroDroid push 15:14:11Z, app pushes continued past
+    15:16Z). The legacy MacroDroid → `phone-notify-drain` lane
+    retires with it; the app channel is the sole notification
+    producer.
+  - *Low Battery* (`phone-battery`): `BatteryPush` on the 60-s
+    cycle — the 20% downward crossing latches and pushes
+    `{battery, charging, wifi_ssid, ringer_mode, screen_on}` (the
+    MacroDroid status-POST fields); re-arms above 25%. Replaces
+    the Low Battery Alert macro.
+- **LIVE observers since v1.7.0** (record:
+  `docs/v1.7-push-observers-2026-11-09.md`) — real code behind the
+  toggles, **all still OFF until Jonathan flips them**:
+  - *Calendar* (`phone-calendar`): ContentObserver on the Events
+    URI; rows with `DTSTART`/`DTEND` at/after the cursor push as
+    `{id, title, start, end, location, all_day}`, cap 50/cycle.
+  - *Contacts* (`phone-contacts`): contacts with
+    `CONTACT_LAST_UPDATED_TIMESTAMP` after the cursor push as
+    `{id, display_name, phones, emails}`.
+  - *Messages* (`phone-messages`): observers on the SMS + MMS
+    URIs; separate row-id cursors seeded to the current max
+    (no historical dump); items `{id, kind, address, body, date,
+    type, read}`.
+  - *Call Log* (`phone-calllog`): rows after the row-id cursor
+    push as `{id, number, type, date, duration, cached_name}`.
+  - *Dialer* (`phone-dialer`): TelephonyCallback call-state
+    listener registered only while ON; live events
+    `{state, state_code, number, ts}` — platform limit: the
+    API-35 framework listener delivers state only, so `number`
+    is currently always `""`.
+  - *Health Connect* (`phone-health`): framework HC change-log
+    token check in the bridge cycle (15-min throttle) over
+    Sleep/Steps/HeartRate/Exercise; first check seeds the token;
+    next token stored only on 2xx. Grants live in the Health
+    Connect app — with none granted, the channel's `last_error`
+    says so (verified live) instead of pretending to push.
+  Observers check their runtime permission at registration and
+  set `last_error` if missing — never crash. Cursors advance
+  only on PushClient 2xx; failures land in `last_error` +
+  BridgeLog.
+- **Drains:** the `phone-notify` queue is consumed by the
+  device-push drain (the app channel is the producer of record
+  since the 2026-11-09 flip; the legacy MacroDroid →
+  `phone-notify-drain` lane retired when Jonathan disabled the
+  macro on-phone ~10:16 EST 2026-11-09). Drain consumers for the
+  other `devicepush:*` queues land with their channels' first
+  use. One marked deploy-test item (`wifi_ssid "v16-deploy-test"`)
+  sits in `devicepush:phone-battery` from the 2026-11-09 endpoint
+  verification.
+- Mode reconcile's *actuation* stays under the separate Phase 2 ARM
+  switch; the `push_mode_reconcile` toggle covers the existing
+  observe/verdict/report loop only.
 
 ## Hard rules
 

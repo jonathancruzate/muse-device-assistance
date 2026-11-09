@@ -46,6 +46,27 @@
          WRITE_SECURE_SETTINGS above. -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- v1.6 push channels: runtime (dangerous) permissions, requested
+         ONLY when Jonathan turns the matching channel ON in
+         MainActivity. Declaring them here does not grant them.
+         Observers for calendar/contacts/messages/dialer/call-log are
+         v1.7; v1.6 ships toggle + permission ask only for those.
+         Health Connect grants are NOT Android runtime permissions —
+         they are per-type grants inside the Health Connect app. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <!-- v1.7 Health Connect: framework HC permissions (per-type grants
+         managed in the Health Connect app, not the runtime dialog).
+         HealthPush reads via android.health.connect.HealthConnectManager
+         change logs — no androidx HC library is used. -->
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
     <!-- TV profile (v1.5.0): declare Leanback as optional so the same
          APK installs on Android TV (Shield) and phones alike. -->

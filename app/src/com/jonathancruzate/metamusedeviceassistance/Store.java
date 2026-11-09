@@ -83,6 +83,70 @@ public final class Store {
     public static final String K_VOICE_ENABLED = "voice_enabled"; // module switch (default false)
     public static final String K_VOICE_ACTIVE = "voice_active";   // persisted toggle: voice session believed on
 
+    // Push channels (v1.6) — local push replacement, design
+    // docs/local-push-replacement-v1.6-design-2026-11-09.md §4.
+    // Every channel is Jonathan-controlled: its own Store key, OFF by
+    // default except mode reconcile (the bridge's existing core loop).
+    // OFF means not registered, not read, not pushed.
+    public static final String K_PUSH_NOTIFICATIONS = "push_notifications"; // default false
+    public static final String K_PUSH_CALENDAR = "push_calendar";           // default false
+    public static final String K_PUSH_CONTACTS = "push_contacts";           // default false
+    public static final String K_PUSH_MESSAGES = "push_messages";           // default false
+    public static final String K_PUSH_DIALER = "push_dialer";               // default false
+    public static final String K_PUSH_CALL_LOG = "push_call_log";           // default false
+    public static final String K_PUSH_HEALTH = "push_health";               // default false
+    public static final String K_PUSH_BATTERY = "push_battery";             // default false
+    public static final String K_PUSH_MODE_RECONCILE = "push_mode_reconcile"; // default true
+
+    // Per-channel bookkeeping: cursor (last id/ts/HC token the channel
+    // has consumed; advances only on a 2xx push — see PushClient),
+    // last successful push time, and last error string.
+    public static final String K_PUSH_NOTIFICATIONS_CURSOR = "push_notifications_cursor";
+    public static final String K_PUSH_NOTIFICATIONS_LAST_PUSH = "push_notifications_last_push";
+    public static final String K_PUSH_NOTIFICATIONS_LAST_ERROR = "push_notifications_last_error";
+    public static final String K_PUSH_CALENDAR_CURSOR = "push_calendar_cursor";
+    public static final String K_PUSH_CALENDAR_LAST_PUSH = "push_calendar_last_push";
+    public static final String K_PUSH_CALENDAR_LAST_ERROR = "push_calendar_last_error";
+    public static final String K_PUSH_CONTACTS_CURSOR = "push_contacts_cursor";
+    public static final String K_PUSH_CONTACTS_LAST_PUSH = "push_contacts_last_push";
+    public static final String K_PUSH_CONTACTS_LAST_ERROR = "push_contacts_last_error";
+    public static final String K_PUSH_MESSAGES_CURSOR = "push_messages_cursor";
+    public static final String K_PUSH_MESSAGES_LAST_PUSH = "push_messages_last_push";
+    public static final String K_PUSH_MESSAGES_LAST_ERROR = "push_messages_last_error";
+    public static final String K_PUSH_DIALER_CURSOR = "push_dialer_cursor";
+    public static final String K_PUSH_DIALER_LAST_PUSH = "push_dialer_last_push";
+    public static final String K_PUSH_DIALER_LAST_ERROR = "push_dialer_last_error";
+    public static final String K_PUSH_CALL_LOG_CURSOR = "push_call_log_cursor";
+    public static final String K_PUSH_CALL_LOG_LAST_PUSH = "push_call_log_last_push";
+    public static final String K_PUSH_CALL_LOG_LAST_ERROR = "push_call_log_last_error";
+    public static final String K_PUSH_HEALTH_CURSOR = "push_health_cursor";
+    public static final String K_PUSH_HEALTH_LAST_PUSH = "push_health_last_push";
+    public static final String K_PUSH_HEALTH_LAST_ERROR = "push_health_last_error";
+    public static final String K_PUSH_BATTERY_CURSOR = "push_battery_cursor";
+    public static final String K_PUSH_BATTERY_LAST_PUSH = "push_battery_last_push";
+    public static final String K_PUSH_BATTERY_LAST_ERROR = "push_battery_last_error";
+    public static final String K_PUSH_MODE_RECONCILE_CURSOR = "push_mode_reconcile_cursor";
+    public static final String K_PUSH_MODE_RECONCILE_LAST_PUSH = "push_mode_reconcile_last_push";
+    public static final String K_PUSH_MODE_RECONCILE_LAST_ERROR = "push_mode_reconcile_last_error";
+    // Low Battery latch: true once the 20% downward crossing has been
+    // pushed; re-arms when battery rises above 25%.
+    public static final String K_PUSH_BATTERY_LATCHED = "push_battery_latched";
+    // PushClient retry queue: a JSON array string of failed payloads
+    // ({source, ts, items}) kept in prefs; see PushClient.
+    public static final String K_PUSH_QUEUE = "push_queue";
+
+    // v1.7 observer row cursors — separate from the per-channel
+    // timestamp cursors above (MainActivity seeds those to "now" on
+    // toggle-ON). Row-id cursors seed themselves to the current max
+    // _ID on first observer run (no historical dump).
+    public static final String K_PUSH_MESSAGES_SMS_ID = "push_messages_sms_id";
+    public static final String K_PUSH_MESSAGES_MMS_ID = "push_messages_mms_id";
+    public static final String K_PUSH_CALL_LOG_ID = "push_call_log_id";
+    // Health Connect (v1.7): change-log token (string) + last-check
+    // throttle timestamp. Token advances only on a 2xx push.
+    public static final String K_PUSH_HEALTH_TOKEN = "push_health_token";
+    public static final String K_PUSH_HEALTH_LAST_CHECK = "push_health_last_check";
+
     // Tailscale guardian (v1.3.1 detection; v1.3.2 reviver)
     public static final String K_TS_DOWN_SINCE = "ts_down_since";   // epoch ms tailnet first seen down (0 = up)
     public static final String K_TS_LAST_LAUNCH = "ts_last_launch"; // epoch ms of last revive launch attempt

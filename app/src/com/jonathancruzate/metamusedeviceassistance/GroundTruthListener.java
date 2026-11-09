@@ -41,7 +41,9 @@ public class GroundTruthListener extends NotificationListenerService {
 
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
+        // Ground-truth parsing path FIRST and unchanged (v1.6 design §4).
         handle(sbn, "posted");
+        forwardPush(sbn, "posted");
     }
 
     @Override
@@ -51,6 +53,60 @@ public class GroundTruthListener extends NotificationListenerService {
         if (sbn != null && Probe.ROUTINES_PKG.equals(sbn.getPackageName())) {
             BridgeLog.log(this, "LISTENER", "routines notification removed: "
                     + titleOf(sbn.getNotification()));
+        }
+        forwardPush(sbn, "removed");
+    }
+
+    /**
+     * Notifications push channel (v1.6) — replaces MacroDroid's Notify
+     * Push macro AND the notifications.get pulls. When (and only when)
+     * Jonathan has turned push_notifications ON, every package's posted
+     * AND removed notifications are forwarded via PushClient with
+     * source "phone-notify". Removed events are new in v1.6: MacroDroid
+     * Notify Push v2 (never shipped) was the only prior plan for them —
+     * stops/CLEARED are now visible too.
+     *
+     * When the channel is OFF this method returns immediately and the
+     * listener's behavior is exactly the pre-v1.6 behavior. TV profile
+     * is gated off by PushChannels.isOn.
+     */
+    private void forwardPush(StatusBarNotification sbn, String event) {
+        if (sbn == null) return;
+        if (!PushChannels.isOn(this, PushChannels.NOTIFICATIONS)) return;
+        try {
+            Notification n = sbn.getNotification();
+            String title = "", text = "", big = "";
+            if (n != null && n.extras != null) {
+                Bundle ex = n.extras;
+                title = stringOf(ex.getCharSequence(Notification.EXTRA_TITLE));
+                text = stringOf(ex.getCharSequence(Notification.EXTRA_TEXT));
+                big = stringOf(ex.getCharSequence(Notification.EXTRA_BIG_TEXT));
+                if (text.isEmpty()) {
+                    CharSequence[] lines = ex.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
+                    if (lines != null) {
+                        StringBuilder sb = new StringBuilder();
+                        for (CharSequence l : lines) {
+                            if (sb.length() > 0) sb.append('\n');
+                            sb.append(l);
+                        }
+                        text = sb.toString();
+                    }
+                }
+            }
+            org.json.JSONObject item = new org.json.JSONObject();
+            item.put("package", sbn.getPackageName());
+            item.put("title", title);
+            item.put("text", text);
+            item.put("big_text", big);
+            item.put("posted_at", sbn.getPostTime());
+            item.put("event", event);
+            item.put("key", sbn.getKey());
+            org.json.JSONArray items = new org.json.JSONArray();
+            items.put(item);
+            PushClient.pushAsync(this, PushChannels.NOTIFICATIONS.source, items);
+        } catch (Exception e) {
+            BridgeLog.log(this, "PUSH", "phone-notify forward failed: "
+                    + e.getClass().getSimpleName() + " " + e.getMessage());
         }
     }
 

@@ -126,6 +126,10 @@ public final class WorkerClient {
             body.put("ack", !tv && "in_sync".equals(verdict));
             body.put("plan", tv ? "tv profile: phone surfaces gated off" : Store.get(ctx, Store.K_PLAN, ""));
             body.put("status", StatusProducer.produce(ctx));
+            // v1.6: Jonathan's per-channel push toggles + last push /
+            // last error, so Muse can see the state he set (design §4).
+            // On TV every channel reports on=false (profile gate).
+            body.put("push_channels", PushChannels.snapshot(ctx));
             body.put("adb", AdbBridge.snapshot(ctx));
             body.put("tailscale", TailscaleGuard.snapshot(ctx));
             body.put("shell_bridge", ShellBridge.snapshot(ctx));
