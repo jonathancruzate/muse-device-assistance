@@ -913,6 +913,65 @@ long-press or the widget.
   `voice_mode on` dispatched 23:26:34 EST (`cmd-6154e671`);
   bridge message sent to the main chat ~23:28 EST (submission
   795b8f69). Outcome pending Jonathan's confirmation.
+- **THE PROVEN WORKFLOW — self-activated voice with bridge prime
+  (LIVE-VERIFIED 2026-11-11 12:09–12:11 EST; Jonathan's verdict:
+  "It worked, perfect"):** this is the exact sequence, and order
+  + timing are the mechanism — every failed attempt on
+  2026-11-10/11 broke one of these steps (bridge before voice,
+  bridge after the session ended, bridge via chat tooling, or a
+  prime truncated by the relay args cap).
+  *Preconditions, from a fresh relay report:*
+  `shell_bridge {paired:true, on:true, voice_enabled:true,
+  voice_active:false}`, pending queue empty. Lane: the box
+  device relay only —
+  `~/workspace/cloudflare-workers/mode-sync/phone-bridge-cmd.sh`.
+  Enqueue commands SINGLY, confirming each before the next.
+  1. **Voice first — Muse starts it, never Jonathan.**
+     `phone-bridge-cmd.sh enqueue voice_mode on`. Confirm the
+     command record: state done, result ok, "voice_mode=on
+     dispatched" (~200 ms). Proof: `cmd-22e8f628`, enqueued
+     2026-11-11T17:09:49Z.
+  2. **Wait ~10 seconds** for the session UI to connect. In
+     that window the PiP return step runs on its own: the
+     service relaunches the foreground app recorded before the
+     assist launch (aura / this app / the launcher skipped) —
+     that IS the "back to the previous app" step; leaving aura
+     triggers the session's auto-PiP, so the session floats
+     over his app — or `GLOBAL_ACTION_HOME` fires when nothing
+     returnable was recorded.
+  3. **Then the bridge — as Jonathan, via Device Assistance.**
+     `phone-bridge-cmd.sh enqueue voice_bridge <prime>` while
+     the session is LIVE — not before it starts, not after it
+     ends. Confirm: state done, ok, "voice_bridge queued
+     (NN chars)" with NN = the prime's FULL length. The hunt
+     (~17 s) brings Muse forward, types the prime into the
+     conversation composer, and taps Send — a genuine user
+     turn from his own app, in the conversation open on the
+     phone. The live session picks that turn up and Muse
+     speaks first, per SPEAK-FIRST.
+  4. **Prime form — SHORT, inside the relay args cap (§27):**
+     the relay slices args at `CMD_MAX_ARGS = 16`, each arg
+     <=256 chars, and the app gate bans `'` `"` `` ` `` `\`
+     and control characters. A long word-per-arg prime is
+     silently truncated at 16 words — the 85–99-char fragments
+     of the failed trials. Two proven forms: (a) a short prime
+     of <=16 words, word-per-arg — the 2026-11-11 proof prime,
+     15 words / 78 chars, queued in full (`cmd-4c6fd0ab`,
+     enqueued 17:10:12Z): "Voice bridge test. Voice mode is
+     on. This was typed as me. Speak first please."; (b) a
+     longer prime packed into a few quoted phrase args
+     (<=16 args total, each <=256 chars, no banned chars) —
+     §27's 553-char proof. In real use, put the actual reason
+     for the call in the prime, same form.
+  5. **Verify from records, not vibes:** both command records
+     done/ok with the full-length queue ack; the bridge
+     message visible as a genuine user turn in the
+     conversation; Jonathan's on-screen report (session heard,
+     landed back in his previous app / PiP floating). A
+     `screen_foreground` probe fired right after the bridge
+     can catch the hunt's Muse launch window
+     (`AuraWidgetLaunchActivity`) — it neither proves nor
+     disproves the PiP landing.
 - **Confirming a session actually started (chat-side evidence):**
   the Worker command result distinguishes "voice_mode=on
   dispatched" (fresh launch) from "voice_mode=on (already active,
@@ -1349,3 +1408,44 @@ endpoint (127.0.0.1:8793, local file store). Record:
 + execution doc §17. (Historical: the tools were deployed +
 harness-verified on muse-mcp v1.1.0 earlier that night; live
 authed calls never ran — KV 429 hard stop — and are moot.)
+
+
+## v1.14.1 — PiP return-target fix: One Hand Operation + was recorded as the "last app" (2026-11-11)
+
+Full record: `docs/execution-2026-11-09.md` §25. Summary:
+- **Bug (Jonathan's report, live call 2026-11-11 ~02:50 EST):** after
+  the self-activated voice flow, the PiP return landed him in
+  Samsung **One Hand Operation +** (`com.samsung.android.sidegesturepad`)
+  instead of the app he had been using. Root cause is code-confirmed:
+  the foreground capture's fallback branch scanned
+  `getWindows()` **without a window-type filter**, and One Hand
+  Operation +'s persistent **TYPE_APPLICATION_OVERLAY** edge-handle
+  window passed `isReturnable` — the overlay gets recorded as the
+  "foreground app" and `pipDoStep` then faithfully relaunches it.
+  The capture→relaunch path shipped in v1.10.0 (2026-11-09), first
+  installed via v1.11.0 (~2026-11-10 01:53 EST), carried verbatim
+  through v1.12.0/v1.14.0 — matching his "worked a couple of
+  versions ago" (the pre-v1.10 builds never relaunched a recorded
+  package at all).
+- **v1.14.1 (versionCode 24) BUILT — STAGED, not installed.** APK
+  6,101,157 bytes (byte-size identical to v1.13.0/v1.14.0;
+  code-only change), SHA-256
+  `a8014a66f3183be8bb8b38c17f0359b6e9875df1913bbf8717861deb1f0eb2d2`,
+  family cert unchanged (in-place install preserves pairing +
+  grants). Changes, voice files only: (1) the
+  `VoiceAccessibilityService.currentForegroundPackage()` fallback
+  scan accepts only `TYPE_APPLICATION` windows; (2) `isReturnable()`
+  also excludes `com.samsung.android.sidegesturepad` as
+  belt-and-braces; (3) `VoiceLauncher.launchVoice()` BridgeLogs the
+  capture (`return target recorded: … (launch voice — return
+  target)`) — the capture was previously unlogged, so a regression
+  can never again be diagnosed blind.
+- **Deploy staged, not forced:** Jonathan was mid-voice-session
+  when the fix was built, the VM install lane was down, and his
+  pattern is installing in place (as for v1.11.0/v1.14.0). The
+  phone still runs v1.14.0/vc23. **Verification owed:** after his
+  in-place install, run one joint voice activation from a real
+  app — the BridgeLog must show `return target recorded: <his
+  app>`, `PiP return: relaunched <his app>`, and
+  `PiP verify: … foreground=<his app>`, and he must land back in
+  his app.
