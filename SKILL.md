@@ -776,6 +776,54 @@ otherwise hands-busy and a spoken exchange serves him better than
 text — instead of voice mode only ever starting from his side-button
 long-press or the widget.
 
+- **THE VOICE PATH — canonical standing rule (Jonathan, live voice
+  call 2026-11-11 ~02:47 EST — "this is working great"; reaffirming
+  and extending the 2026-11-08 discretion grant below):** this app's
+  `voice_mode` module is **THE way Muse talks to Jonathan by
+  voice** — the standing default reach-him channel, used at Muse's
+  own discretion whenever it needs to, not an exceptional measure.
+  When Muse needs to speak to Jonathan, it self-activates a voice
+  session here; it does not ask first and does not route around this
+  path. The bounds are unchanged and bind every use: **speak first**
+  on self-activation (below), **never while he is asleep / in Night
+  mode**, never extend an exchange he has ended, never override a
+  "stop" / "I'm good for now." Channel choice still reads live
+  phone state first (fresh report; the checklist in the connector
+  doc + the context-engine rules in `local-proactive-intervention`):
+  phone in hand → voice here; phone idle / locked / in a call → the
+  agentring phone line is the fallback.
+- **This path REPLACES the MacroDroid voice-mode mechanism
+  (Jonathan, same call, 2026-11-11):** the legacy MacroDroid
+  voice-mode toggle/shortcut lane and the MacroDroid `?do=speak`
+  TTS route are **superseded** — Device Assistance `voice_mode` is
+  the single voice path now. (The MacroDroid speak route was
+  already deprecated in this path's favor on 2026-11-08; the
+  standalone Muse Voice Mode Shortcut app survives only as
+  Jonathan's own manual hardware switch — side button / Buds
+  hold — and is no longer a lane Muse uses as its voice
+  mechanism.) Replacement verified live before retirement:
+  multiple successful voice sessions on 2026-11-08 and again on
+  2026-11-11, including the call this order was given on.
+  `local-phone-automations` and `local-muse-voice-mode-shortcut`
+  carry the superseded markers; this skill is the canonical home
+  of the rule.
+- **Galaxy Buds rule (Jonathan, same call, 2026-11-11 ~02:48 EST —
+  "if possible"):** when Muse detects Jonathan is **using his
+  Galaxy Buds** (buds connected + worn), communicate with him
+  **via voice mode** — buds-in is a voice-first signal: his ears
+  are already in, so a voice session is the lowest-friction
+  channel. Detection rides the Galaxy Buds connector status
+  (`custom.galaxy-buds`: the plugin's status export — `connected`
+  + `wearing` — via `buds status` / the mirrored export).
+  **Detection confidence, stated honestly:** as of 2026-11-08 the
+  SPP verbs (including the status read that reports `wearing`)
+  were built but **not yet live-verified** — his Buds2 were
+  disconnected for the whole verification run — so until a
+  connected-buds run proves the status read, buds state counts as
+  confirmed only when a fresh export actually shows connected +
+  worn; when buds state can't be confirmed, fall back to the
+  normal channel judgment (chat / the checklist) rather than
+  assuming buds-in.
 - **Optional and off by default.** The module ships disabled; Jonathan
   enables it (and its accessibility service) in the app. Disabled
   means the capability does not exist, not that it is merely unused.
@@ -926,6 +974,29 @@ long-press or the widget.
   sessions; off→on clean). The MacroDroid route for Muse-initiated spoken contact
   is deprecated in its favor (see the phone-automations skill,
   2026-11-08 note).
+- **PiP confirmation on self-activated sessions (v1.10.0, BUILT
+  2026-11-09 — not yet installed, not yet live-verified; record:
+  `docs/execution-2026-11-09.md`):** the Muse voice session
+  **auto-PiPs on user-leave** — mechanism confirmed by Jonathan as
+  device owner 2026-11-09 23:40 EST ("the app always goes into PiP
+  if voice mode is on"); live verification pending the joint trial.
+  On a self-activated start (only that path arms it), once the
+  session UI is confirmed present (+ ~900 ms settle) the service
+  runs **Jonathan's choreography** (adopted 2026-11-09 23:41 EST):
+  before the assist launch, `VoiceLauncher` records the foreground
+  package he was using (skipping aura, our own package, and the
+  launcher); after connect it relaunches that package — leaving
+  aura floats the session over his app — or fires
+  `GLOBAL_ACTION_HOME` when nothing returnable was recorded. It
+  then verifies and BridgeLogs whether a PiP window was actually
+  observed (`PiP return:` / `PiP verify:` lines, with the
+  foreground package after the return). The
+  `docs/pip-investigation-2026-11-09.md` minimize-control hunt
+  survives only as the fallback when the return logs no PiP window
+  observed (at most one tap), and the first session per activation
+  also dumps the full Muse voice-window node inventory to
+  BridgeLog for the record. Nothing else changed: speak-first,
+  the bridge, and the v1.5.2 reconciler are untouched.
 
 ## Push channels — local push replacement (v1.6.0 contract; v1.7.0 observers LIVE, toggles Jonathan's)
 
@@ -1121,3 +1192,160 @@ channel**.
   `Actuation` + `RoutineFirer` (Phase 2 gate/firing), `Store`
   (all prefs keys), `Probe` (Phase 0), `BridgeLog` (on-device log) —
   all under `app/src/com/jonathancruzate/metamusedeviceassistance/`.
+
+## v1.9 transport cut — status (2026-11-09, executor record)
+
+Full record: `docs/v1.9-transport-cut-2026-11-09.md`. Summary:
+- **KV bleed-stop deployed** on the mode-sync Worker: v1.8's listener
+  forwarded the app's OWN foreground-service notification, and the
+  Worker rewrote the whole device-push queue per POST — a self-loop
+  that burned the account KV write cap two days running. The Worker
+  now drops self-package notify items at ingest and writes
+  commit-on-change. Verified by A/B under cap-dead conditions.
+- **v1.9.0 (versionCode 18) INSTALLED** 2026-11-10 ~00:49 UTC. The
+  `transport` directive is live in Worker mode-state responses and
+  the box relay (`device-relay.service`, tailnet 100.85.53.70:8792)
+  is healthy; the app's self-switch executes on its next cycle but
+  was **not yet observed** at the record's writing (phone dozing;
+  probe command `cmd-57bc6ed9-85f6-417d-8158-29dc0d321494`, 24 h TTL,
+  pending on the relay — its execution proves the switch).
+- **Consumer bug fixed:** the box's `req.sh` ignored stdin bodies
+  while VM consumers pipe them (the documented `relay_req` contract),
+  so relayed `/mode-set` and `/phone-bridge/enqueue` POSTs arrived
+  bodyless (`bad request`). `req.sh` now reads stdin for bodyless
+  POSTs; verified end-to-end. Canonical relay copies: project `relay/`.
+- **Panel lanes stay on the Worker** as a documented exception (the
+  relay port excludes them; the widget producer is dormant since
+  2026-11-06). Worker phone-facing endpoint retirement is gated on
+  the cut's verification matrix (a)–(h), still pending the switch.
+
+## v1.10.0 — voice PiP confirmation (2026-11-09, executor record)
+
+Full record: `docs/execution-2026-11-09.md`. Summary:
+- **v1.10.0 (versionCode 19) BUILT, NOT installed** (the brief's
+  "v1.5.3/vc15" name was superseded by the live line's advance to
+  v1.9.0/vc18 — see the record's version-resolution note). APK
+  5,724,244 bytes, SHA-256
+  `4488e68a27995063fec1006c85a87307f7e511835b4ed1473c90b7675d50504d`,
+  family cert unchanged. It adds the PiP confirmation sequence to
+  the voice module only (see the voice section's PiP bullet);
+  speak-first, the bridge, the v1.5.2 reconciler, the pairing, and
+  the Phase 2 surface are untouched.
+- **Install blocked tonight:** the ADB lane refused on both known
+  endpoints (tunnel proxy closes CONNECT — same state the v1.9
+  record noted), the Worker report is frozen at the KV cap, the
+  relay report is still the seed, and a relay probe stayed pending
+  (the app's transport self-switch is still unobserved). The phone
+  still runs v1.9.0/vc18; nothing on it changed. Unblock = the
+  app's next wake cycle completing the self-switch (fresh relay
+  report) or the 2026-11-11 00:00 UTC KV reset; then `install -r`
+  + the owed read-backs (version 1.10.0/vc19, accessibility grant,
+  pairing + self-test, `voice_enabled` unchanged).
+
+## v1.11.0 — loop fix + local-first data transport (2026-11-10, executor record)
+
+Full record: `docs/v1.11-build-report.md` + `docs/execution-2026-11-09.md` §10. Summary:
+- **v1.11.0 (versionCode 20) INSTALLED + VERIFIED RUNNING**
+  (Jonathan installed in place ~01:53 EST 2026-11-10; verified
+  02:11 EST by on-screen log signature — the v1.11.0-only
+  "push local ok … no tailnet bridge base — local only" lines;
+  loop fix holding live, tier-1 outbox delivering; execution doc
+  §14). APK 5,724,244 bytes,
+  SHA-256 `89cee61a94e1101729152f3ec27733943eb546374a13ae1078d89a58641e1f82`,
+  family cert unchanged (verified byte-identical to 1.10.0's).
+  Supersedes v1.10.0: its voice/PiP work and the v1.5.2 reconciler
+  carry over verbatim (files untouched). Only build.sh,
+  GroundTruthListener.java, and PushClient.java changed. Phase 2
+  untouched and disarmed; pairing and manifest untouched.
+- **Loop fix at the source:** the notification listener now IGNORES
+  always-running notifications (FLAG_ONGOING_EVENT |
+  FLAG_FOREGROUND_SERVICE, any package) plus a hard self-package
+  exclusion. That class — including this app's own foreground-service
+  notification — was the self-sustaining push loop that burned the
+  mode-sync KV write cap on 2026-11-09 and 2026-11-10. All push
+  channels are KEPT: a 2026-11-10 premise check refuted the
+  direct-to-Muse-app design's duplication claim (the Muse catalog
+  is pull; device-push-drain is the sole notify intake and DA's
+  channel is the only event-driven pipe). Design errata recorded in
+  `docs/direct-to-muse-app-design-2026-11-10.md`.
+- **Data-channel transport is local-first:** PushClient delivers to
+  the on-device outbox (tier 1 — the delivery; cursors advance on
+  it) and mirrors best-effort ONLY to an https://*.ts.net base
+  (tier 2, Tailscale Serve form). Data channels never POST to the
+  Worker or any http base anymore. Residual gap, stated plainly:
+  the Muse app exposes no local ingest API, so the tier-1 outbox
+  is where the path ends today; the fleet drain sees data-channel
+  items only via a tier-2 mirror. Control lanes stay on
+  WorkerClient's rendezvous, untouched.
+- **Tier 2 front UP + directive repointed (§11), self-switch
+  blocked on a diagnosed cause (§14):** the Serve front answers
+  at `https://vps.taila56db5.ts.net:8443` and the Worker
+  `transport` directive carries it — but the app's mode-state
+  responses currently carry `desired: null` (the Worker's KV
+  `mode:desired`/`mode:actual` read back empty through every
+  handler since the §11 redeploy window; the live desired
+  exists only in the relay store), and
+  `WorkerClient.fetchDesired` returns before
+  `handleTransportDirective` whenever desired is absent, so
+  the directive is never processed. Remedy (post KV reset,
+  2026-11-11 00:00 UTC): mirror the relay's current desired
+  verbatim into the Worker KV, read back `/mode-state` showing
+  desired + transport together; the next app cycle then
+  self-switches. Optional later app build: process the
+  transport directive independent of the desired gate.
+- **Build route note:** built on Muse after the ordered agy leg
+  failed — frontier ladder exhausted, proven cause agy account
+  quota RESOURCE_EXHAUSTED (429, resets ~95h); re-selection per the
+  Decision Matrix, recorded in `docs/v1.11-build-progress.md`.
+
+## v1.12.0 — directive gate fix + scoped cleartext + Health channel removed (2026-11-10, executor record)
+
+Full record: `docs/v1.12-build-report.md` + `docs/execution-2026-11-09.md` §16. Summary:
+- **v1.12.0 (versionCode 21) BUILT — NOT YET INSTALLED** (the
+  phone still runs v1.11.0). APK 5,720,229 bytes,
+  SHA-256 `a8299ea8dfe8e1f1c53284ff733b12c329ab87e7d5640d3b801e1bef4bcf8884`,
+  family cert verified byte-identical to v1.11.0's.
+- **Directive gate fix:** `WorkerClient.fetchDesired` processes
+  the transport directive (`handleTransportDirective`) whenever a
+  `transport` object is present — immediately after parsing,
+  BEFORE / independent of the desired gate. The §14 strand (a
+  desired-less mode-state response stranding the directive riding
+  the same body) cannot recur; desired parsing/storage behavior
+  is otherwise identical.
+- **Scoped cleartext:** new `res/xml/network_security_config.xml`
+  (manifest `networkSecurityConfig`; NO global
+  `usesCleartextTraffic`): base cleartext OFF, one domain-config
+  entry permitting cleartext ONLY to `100.85.53.70` (the box
+  tailnet node — Android domain-config cannot express the
+  100.64.0.0/10 CGNAT range; the file's comment says so). The app
+  can now reach the tailnet-local endpoints (box relay, VM
+  endpoint tunnel terminus) directly, without the Serve https
+  hairpin.
+- **Health Connect channel REMOVED** (Jonathan's order
+  2026-11-10; agreed 2026-11-09 — redundant with the Health
+  Connect connector, which keeps owning health data): channel
+  registration, push path (HealthPush.java deleted), settings
+  toggle, Store keys, and the manifest HC permission
+  declarations are all out — not defaulted off, gone. Channel
+  set is now: notifications, calendar, contacts, messages,
+  dialer, call log, battery (+ mode_reconcile). The Health
+  Connect connector and the Muse app's permission are untouched.
+- Carry-overs verbatim: v1.11.0 loop fix, tier-1 outbox + tier-2
+  mirror, the v1.10/v1.11 PiP sequence, the v1.5.2 reconciler,
+  pairing, Phase 2 DISARMED untouched.
+
+## Consumed via muse-mcp tools (2026-11-10) — RETIRED the same night
+
+**muse-mcp was RETIRED 2026-11-10 (Jonathan's order — "retire
+the mcp, we don't need it"); the Worker script + routes are
+deleted.** The five `muse_device_*` tools' semantics were folded
+into the VM endpoint service and verified locally first — the
+agent surface for this app is now the local CLI
+**`~/workspace/muse-device-assistance/vm-endpoint/bin/device-tools.js`**
+(`report` / `data <source>` / `command <template>` — enqueue
+singly — / `command-status <id>` / `mode`) against the VM
+endpoint (127.0.0.1:8793, local file store). Record:
+`~/workspace/cloudflare-workers/muse-mcp/RETIREMENT-2026-11-10.md`
++ execution doc §17. (Historical: the tools were deployed +
+harness-verified on muse-mcp v1.1.0 earlier that night; live
+authed calls never ran — KV 429 hard stop — and are moot.)
