@@ -792,9 +792,13 @@ long-press or the widget.
   doc + the context-engine rules in `local-proactive-intervention`):
   phone in hand → voice here; **phone locked → still voice here**
   (the v1.19 unlock gate handles it — see VOICE CALL below);
-  phone in a call → hold or chat; **phone OFFLINE / unreachable →
-  Google Home broadcast, but only when he is home** (the
-  2026-11-13 routing rule, canonical in
+  phone in a call → hold or chat; **Galaxy Buds connected +
+  screen locked → ALWAYS voice here, never chat alone** (his
+  order 2026-11-13 — a locked phone with buds in means a chat
+  message is a message missed; the standing gates still win:
+  asleep / Night mode and at-work stay never-speak); **phone
+  OFFLINE / unreachable → Google Home broadcast, but only when
+  he is home** (the 2026-11-13 routing rule, canonical in
   `~/workspace/automation-chats/notification-routing.md`);
   otherwise the agentring phone line is the fallback.
 - **This path REPLACES the MacroDroid voice-mode mechanism
@@ -1043,6 +1047,29 @@ long-press or the widget.
     around (measured ~4 min, 2026-11-13 03:08→03:12 EST) and
     then executes in full. Pending ≠ failed; check
     `command-status` before concluding anything.
+  * **Be heard — volume pre-flight (his order 2026-11-13
+    03:53 EST: "check the phone volume first and adjust
+    accordingly so that you are heard"):** before firing, read
+    the media volume via the shell_bridge template
+    `media_volume_get` (STREAM_MUSIC, range 0..15 — voice
+    playback rides this stream on the phone speaker AND on
+    connected Galaxy Buds; the buds connector's volume verbs
+    move this same stream). If it reads near-silent (≤3), the
+    call would land mute: raise it with `media_volume_set` to
+    10 and verify by read-back BEFORE firing. A normal level
+    is left untouched — adjust only what's needed to be heard.
+    If the read or the set fails, fire anyway and flag in chat
+    that audibility wasn't confirmed.
+  * **Buds connected + screen locked → voice, always (his
+    order 2026-11-13 03:53 EST):** when his Galaxy Buds are
+    connected (status via the `custom.galaxy-buds` connector —
+    SPP status live-verified 2026-11-13) and the phone screen
+    is locked, anything worth telling him goes by `voice_call`,
+    never chat alone — otherwise he might miss it entirely.
+    The standing gates still win: asleep / Night mode → never
+    speak; at work → never speak. The fire itself handles the
+    locked screen (unlock gate above); for the routing
+    decision, buds-connected is the verifiable trigger.
   * The two-command decomposition (voice_mode on → wait →
     voice_bridge) remains the manual fallback when the combined
     fire itself is the thing under test.
