@@ -1695,6 +1695,49 @@ and delivered to the phone BY the self-update path itself (fetch
 1.22.0/33) — the second live self-update, and the first carrying
 a real version bump. This union build is the v1.22.0 of record.
 
+## v1.23.0 — Phase 2 actuation REMOVED (built + installed 2026-11-13)
+
+At Jonathan's order (2026-11-13 ~03:10–03:27 EST: disarm + remove
+actuation from the app, fix it all, upstream), after the Nov 10–13
+double-fire Sleep failures — the app's armed actuation and
+mode-sync.sh fired the same Samsung mode switches seconds apart,
+two writers cancelling each other out — the Phase 2 firing
+machinery was **removed**, not just disarmed:
+
+- `Actuation.java` and `RoutineFirer.java` **DELETED** (both
+  trees). The arm switch, the per-mode routine-link UI and its
+  shortcut-capture flow, the `K_ACT*` / `K_LINK*` Store keys, the
+  report's `actuation` object, and every call site in
+  `BridgeService.java`, `WorkerClient.java`, `MainActivity.java`,
+  and `Store.java` are gone. Zero-reference proof + full record:
+  `docs/v1.23-actuation-removal-2026-11-13.md`.
+- The app is now **observe/report only** for house modes: ground
+  truth, verdicts, and the Reconciler's shadow plan (what actuation
+  *would* have done — it NEVER fires) remain; there is no arm
+  switch anymore and nothing in the app can fire a routine.
+- **mode-sync.sh is the sole phone-mode writer by construction**,
+  not by gate state — the one-writer rule from the Sleep failure,
+  enforced by there being no second writer left to fire.
+
+**Build record:** versionCode 34 / 1.23.0; APK
+`app/Muse-Device-Assistance-1.23.0.apk`, 6,105,253 bytes, SHA-256
+`799b6e0f173c1f0e459dec3d7b22a6cd9b90bbccdcd270b1908aa9e3f6432013`,
+same signer as v1.22.0 (family cert 4dcb45fa…7236).
+
+**Install + verification:** delivered by `self_update`
+(cmd-15cbe878-f991-4fca-9ab4-ad599903799d, enqueued 03:47:17 EST);
+the phone fetched the APK from the box serve unit at 03:47:32 EST
+(serve log, from the phone's tailnet IP). The overnight post-install
+report was delayed by deep doze, and v1.24.0 (below) shipped on
+this tree hours later: the fresh relay report of 2026-11-13
+07:52 EST reads `self_update {version_name: 1.24.0,
+version_code: 35, stage: installed, from_code: 34}` — code 34 is
+v1.23.0, its direct predecessor — with **NO `actuation` field
+anywhere in the report**, observed mode Home, and
+`shell_bridge {paired: true, self_test_ok: true}`. The removal is
+live-verified and carried forward into v1.24.0. The box serve
+unit (da-update-serve, port 8795) was stopped after verification.
+
 ## v1.24.0 — phone file management (built 2026-11-13)
 
 Jonathan (2026-11-11): "I mean local files on my phone such as the
