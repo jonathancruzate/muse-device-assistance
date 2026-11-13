@@ -790,8 +790,13 @@ long-press or the widget.
   "stop" / "I'm good for now." Channel choice still reads live
   phone state first (fresh report; the checklist in the connector
   doc + the context-engine rules in `local-proactive-intervention`):
-  phone in hand → voice here; phone idle / locked / in a call → the
-  agentring phone line is the fallback.
+  phone in hand → voice here; **phone locked → still voice here**
+  (the v1.19 unlock gate handles it — see VOICE CALL below);
+  phone in a call → hold or chat; **phone OFFLINE / unreachable →
+  Google Home broadcast, but only when he is home** (the
+  2026-11-13 routing rule, canonical in
+  `~/workspace/automation-chats/notification-routing.md`);
+  otherwise the agentring phone line is the fallback.
 - **This path REPLACES the MacroDroid voice-mode mechanism
   (Jonathan, same call, 2026-11-11):** the legacy MacroDroid
   voice-mode toggle/shortcut lane and the MacroDroid `?do=speak`
@@ -972,6 +977,75 @@ long-press or the widget.
      can catch the hunt's Muse launch window
      (`AuraWidgetLaunchActivity`) — it neither proves nor
      disproves the PiP landing.
+- **VOICE CALL — the single combined fire (CANONICAL since
+  2026-11-13; Jonathan's design orders 2026-11-11 12:16–12:19
+  EST, live-verified end-to-end on a locked phone 2026-11-13
+  03:12–03:21 EST, his verdict: "it worked"):** the two-command
+  workflow above is superseded as the default by ONE command —
+  `phone-bridge-cmd.sh enqueue voice_call` (no args) →
+  `VoiceBridge.executeCombined`. One fire runs the whole
+  sequence in the only order that works: voice launch → the
+  fixed marker typed **as Jonathan** once the session is
+  observably CONNECTED → session speaks first from the payload →
+  return to his previous app with the session floating. The
+  mechanics that make it reliable, each one bought with a failed
+  live attempt on 2026-11-11/12:
+  * **Payload protocol v2 (semantic prep BEFORE the mechanical
+    fire):** the firing side (1) writes the payload into
+    `~/workspace/voice_context.md` (fired_at in America/New_York,
+    firing chat, what to tell him and why, written for the ear;
+    state PENDING → the firing side flips it to CONSUMED with
+    the outcome after the test), AND (2) sends the same payload
+    text to the **main chat** via `chat.send_message`, framed as
+    the voice session's context, BEFORE firing. Step (2) is
+    load-bearing: the session speaks from the in-chat payload.
+    The file alone is NOT a reliable channel — on 2026-11-11
+    (attempt 6) the session's two reads of the file tripped the
+    runtime's prompt-injection safety check and it refused to
+    speak from it; the session itself proposed the in-chat form
+    ("What's written in the chat between us, I can use"). The
+    typed turn itself is the fixed marker
+    (`VoiceBridge.VOICE_CONTEXT_MARKER`): "This was fired by
+    voice mode. Stay quiet until you read the voice context,
+    then speak first."
+  * **Prompt waits for CONNECTED, not for UI (v1.17):** the
+    bridge hunt holds until `hatch-voice-call-connected` is
+    observed on 2 consecutive polls — the generic session-UI
+    probe renders on the CONNECTING screen and released the
+    prompt (and the return) seconds before the session was
+    truly live, twice (attempts 2–3, 5). `schedulePipAttempt()`
+    itself refuses to run while a combined call is pending —
+    the return has exactly one release (`onMarkerResolved` or
+    the 50 s watchdog), so no path can float him back before
+    the prompt is sent (his order: "Prompt first then back to
+    last app").
+  * **20 s post-send dwell (v1.18):** after the marker sends,
+    the return waits 20 s so the session side can actually
+    process the payload and begin speaking before the float —
+    sending is not processing (his diagnosis, 2026-11-11
+    21:02 EST).
+  * **Locked-screen gate (v1.19; in the installed v1.21+
+    builds):** a fire that finds the keyguard locked defers
+    into `UnlockActivity` (show-when-locked + turn-screen-on
+    trampoline: wake + `requestDismissKeyguard`, poll every
+    500 ms up to 15 s). Instant for swipe locks and Extend
+    Unlock trusted states; a secure lock raises the credential
+    prompt for Jonathan — automation never touches credentials
+    — and a phone still locked after 15 s fails LOUDLY in the
+    BridgeLog and unwinds the combined state instead of hunting
+    a locked screen. If the app did the unlocking, the end of
+    the sequence re-locks (`GLOBAL_ACTION_LOCK_SCREEN`): the
+    phone finishes in the state he left it. The combined
+    watchdog re-arms while an unlock is in flight.
+  * **Pickup latency on a sleeping phone is normal:** the app
+    fetches on its own cycle; a fire to a locked, sleeping
+    phone can sit `pending` for minutes until the cycle comes
+    around (measured ~4 min, 2026-11-13 03:08→03:12 EST) and
+    then executes in full. Pending ≠ failed; check
+    `command-status` before concluding anything.
+  * The two-command decomposition (voice_mode on → wait →
+    voice_bridge) remains the manual fallback when the combined
+    fire itself is the thing under test.
 - **Confirming a session actually started (chat-side evidence):**
   the Worker command result distinguishes "voice_mode=on
   dispatched" (fresh launch) from "voice_mode=on (already active,
