@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MuseTheme: the official Muse app's VDS palette on the
+     framework Material themes. Tokens decomposed from
+     com.facebook.aura 13.0.0.4.159 (2026-11-13;
+     muse-ux-ui-rea/MUSE-DESIGN-TOKENS.md). Light values here;
+     values-night carries the dark set. -->
+<resources>
+    <style name="MuseTheme" parent="@android:style/Theme.Material.Light">
+        <item name="android:colorAccent">#0064D4</item>
+        <item name="android:windowBackground">#FCFCFC</item>
+        <item name="android:textColorPrimary">#111112</item>
+        <item name="android:textColorSecondary">#99111112</item>
+        <item name="android:textColorTertiary">#59111112</item>
+        <item name="android:colorControlNormal">#99111112</item>
+        <item name="android:colorControlActivated">#0064D4</item>
+        <item name="android:colorControlHighlight">#1A0064D4</item>
+        <item name="android:colorButtonNormal">#F3F4F5</item>
+        <item name="android:alertDialogTheme">@android:style/Theme.Material.Light.Dialog.Alert</item>
+    </style>
+</resources>

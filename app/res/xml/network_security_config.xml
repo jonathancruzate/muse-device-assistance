@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1.12.0: SCOPED cleartext. Target SDK 35 denies cleartext by
+     default, which blocked every http://100. base (the local relay /
+     VM endpoint over the tailnet) even though the v1.9 directive
+     validator accepts them (§10/§14). Android's domain-config cannot
+     express a CIDR range (the tailnet CGNAT range is 100.64.0.0/10),
+     so the narrowest workable form is used: cleartext is permitted
+     ONLY to the specific tailnet IP in play — 100.85.53.70, the box
+     tailnet node hosting the device-relay and the VM endpoint's
+     reverse-tunnel terminus (design
+     docs/vm-endpoint-via-home-link-design-2026-11-10.md). Global
+     cleartext stays OFF: base-config cleartextTrafficPermitted is
+     false, and usesCleartextTraffic is NOT set anywhere. If a future
+     directive names a different tailnet IP, add that exact IP here
+     in a new build — never widen this to a range or a wildcard. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">100.85.53.70</domain>
+    </domain-config>
+</network-security-config>

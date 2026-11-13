@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MuseTheme, dark set (VDS dark palette; see values/styles.xml). -->
+<resources>
+    <style name="MuseTheme" parent="@android:style/Theme.Material">
+        <item name="android:colorAccent">#007FFD</item>
+        <item name="android:windowBackground">#050505</item>
+        <item name="android:textColorPrimary">#F5F5F5</item>
+        <item name="android:textColorSecondary">#99F5F5F5</item>
+        <item name="android:textColorTertiary">#66F5F5F5</item>
+        <item name="android:colorControlNormal">#99F5F5F5</item>
+        <item name="android:colorControlActivated">#007FFD</item>
+        <item name="android:colorControlHighlight">#1AFFFFFF</item>
+        <item name="android:colorButtonNormal">#28292B</item>
+        <item name="android:alertDialogTheme">@android:style/Theme.Material.Dialog.Alert</item>
+    </style>
+</resources>

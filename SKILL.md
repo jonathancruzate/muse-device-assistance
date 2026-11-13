@@ -50,7 +50,7 @@ are the same document — update both in the same handling, always.
   Bridge" was uninstalled after the verified cutover)
 - **Version source of truth:** `app/build.sh` — `VERSION_NAME` /
   `VERSION_CODE` in that script, backed by the build records in
-  `github-export/README.md`. Current: **v1.20.0, versionCode 31** (this line was stale at v1.5.1 until the 2026-11-12 correction; app/build.sh is always the truth)
+  `github-export/README.md`. Current: **v1.21.0, versionCode 32** (this line was stale at v1.5.1 until the 2026-11-12 correction; app/build.sh is always the truth)
   (APK `app/Muse-Device-Assistance-1.3.2.apk`, SHA-256
   `3b2adc07d64eb000369f316bfa6f713a376e49c357109aba842166d82ab06166`,
   rebuilt from the renamed canonical tree 2026-11-05.
@@ -1106,6 +1106,19 @@ channel**.
     15:16Z). The legacy MacroDroid → `phone-notify-drain` lane
     retires with it; the app channel is the sole notification
     producer.
+  - *Dual Messenger clone (user 95)*: a second instance of the
+    app, cloned by Jonathan into the Samsung Dual Messenger
+    profile with its own notification access and push setup,
+    pushes the **public WhatsApp account's** notifications into
+    the same `phone-notify` stream — distinguishable by the key
+    prefix (`95|com.whatsapp|...`; the main profile's keys are
+    `0|...`). Live-verified 2026-11-13 (first items received
+    2026-11-12T21:32:21Z, Food Bazaar Supermarket; removed events
+    2026-11-13T06:42Z). This closes the long-standing gap where
+    dual-messenger notifications were invisible to every
+    main-profile listener: the per-user limit still binds the
+    paired-device catalog (`notifications.get` sees user 0 only),
+    but the push lane covers both WhatsApp accounts.
   - *Low Battery* (`phone-battery`): `BatteryPush` on the 60-s
     cycle — the 20% downward crossing latches and pushes
     `{battery, charging, wifi_ssid, ringer_mode, screen_on}` (the
@@ -1480,3 +1493,82 @@ Full record: `docs/execution-2026-11-09.md` §25. Summary:
   gate tests pass (ALL_PASS). APK SHA-256
   `a935fdf62c02afe98e16cf2eb71627016ac0b562d1b0d271c61a28c4af7be9c5`;
   staged, not yet installed as of 2026-11-12 (ADB lane down).
+
+## v1.21.0 — loopback self-update (built + installed + PROVEN 2026-11-13)
+
+- **Why:** ~2026-11-10 the phone forgot the VM's wireless-debugging
+  pairing; v1.19/v1.20 installs were stranded for ~3 days because DA
+  (by its v1.1 design) manages only its OWN loopback pairing and
+  never an external client's authorization. Jonathan's ruling: the
+  app was supposed to make the ADB connection stable — so v1.21
+  removes external ADB from the release path entirely.
+- **New native template `self_update`** (args `<url> <sha256>`,
+  gate `ShellAllowlist.checkSelfUpdate`): https to any host, or
+  http ONLY to the box tailnet host 100.85.53.70 (the manifest's
+  one cleartext domain since v1.12); sha256 exact lowercase hex;
+  URL/userinfo/charset rules mirror `wear_install_face`. The args
+  are typed values and never become shell text.
+- **SelfUpdateRouter flow:** streaming download with SHA-256
+  verification into the app's external files dir → loopback shell
+  `cp` to /data/local/tmp (system_server cannot read FUSE paths
+  for install — proven live; /data/local/tmp works, full cp+pm
+  sequence 3.4s) → stage "installing" mirrored to the Store BEFORE
+  `pm install -r` runs, because the install kills the process and
+  the command result may never post → ground truth is the report.
+  Both shell argv arrays are fully hardcoded in the router.
+- **Report fix (the blind-diagnosis defect):** `shell_bridge` now
+  carries `self_update`: {version_name, version_code,
+  last_update_time, stage, sha, detail, from_code, at}. Before
+  v1.21 the report had NO app-version field at all. Snapshot
+  reconciles a stranded "installing" to "installed" when the
+  running versionCode differs from from_code OR lastUpdateTime is
+  newer than the mirror (same-version reinstall case).
+- **Proof (2026-11-13 01:32 EST):** v1.21.0 installed first via the
+  restored external lane (re-pair completed 01:14 EST), then a
+  `self_update` command served the final v1.21.0 APK (SHA-256
+  `3a5290cc8ea046bb5fd0b26c438c6cdda1cb6734acd976ddf93b19b87904cbea`)
+  from a one-shot HTTP server on the box (systemd-run unit
+  `da-update-serve`, port 8795, tailnet bind). Box log shows the
+  phone's GET at 01:32:22; `dumpsys` lastUpdateTime=01:32:31 —
+  the app reinstalled itself 9 seconds after fetching, no external
+  ADB involved. Post-update process healthy; relay commands
+  executing (battery ok). Companion fix the same night:
+  `adb-ensure.sh` now probes the daemon (raw CNXN) and reports
+  PAIRING LAPSED vs ENDPOINT DEAD distinctly instead of guessing.
+- **To ship the NEXT release:** build, rsync the APK to the box
+  serve dir (verify sha on the box — an scp truncated silently
+  once tonight), enqueue `self_update <url> <sha256>`, verify by
+  report (`self_update.stage=installed`, version bumped) or
+  dumpsys lastUpdateTime. External ADB is now the fallback, not
+  the path.
+- **Report-field whitelist trap (learned 2026-11-13, closing the
+  v1.21 verification):** reports pass through TWO rebuilding
+  sanitizers — the mode-sync Worker (`worker.js`
+  handlePhoneBridgeReportPost) and the box device-relay
+  (`~/device-relay/server.js`) — each constructs `shell_bridge`
+  from a fixed field whitelist. A new report field that is not
+  added to BOTH whitelists is silently stripped even though the
+  app sends it (v1.21's `self_update` was stripped for ~1h until
+  both were patched + Worker redeployed + relay restarted).
+  Any future report-field addition ships with both whitelist
+  entries in the same handling.
+
+## v1.22.0 — Muse-app theme (built + installed 2026-11-13)
+
+Aesthetic match to the official Muse app at Jonathan's order.
+New `MuseTheme` (res/values/styles.xml + values-night): the
+VDS palette decomposed from com.facebook.aura 13.0.0.4.159
+(muse-ux-ui-rea/MUSE-DESIGN-TOKENS.md) applied to the
+framework Material themes — colorAccent #0064D4 (dark
+#007FFD), windowBackground #FCFCFC (dark #050505),
+textPrimary #111112 (dark #F5F5F5) with the VDS alpha tiers
+for secondary/tertiary text, control colors to match. The
+manifest application theme moved from
+@android:style/Theme.Material to @style/MuseTheme; no Java
+changes, Phase 2 actuation untouched. Guards passed; cert
+unchanged. APK 6,113,445 bytes, SHA-256
+2a13dadb0a7af107a8a3ef8e2beffc044bf46777ef5eff48fe360fc5e36e775b.
+Installed -r via the ADB lane, dumpsys verified (code 33);
+MainActivity resumed with no crash after a test launch (the
+verification screencap was black because the display was off
+overnight; visual check lands when the app is next opened).

@@ -625,3 +625,10 @@ actuation is untouched and still defaults DISARMED.
   Install attempted 2026-11-12 04:41 EST; phone unreachable
   (wireless debugging endpoint refused), so this build is
   staged, not installed.
+
+## v1.22.0 (2026-11-13)
+
+Muse-app theme: new MuseTheme carrying the VDS palette
+decomposed from the official Muse app (accent #0064D4 /
+#007FFD, grounds #FCFCFC / #050505, text #111112 / #F5F5F5).
+Theme-only release; no behavior changes.
