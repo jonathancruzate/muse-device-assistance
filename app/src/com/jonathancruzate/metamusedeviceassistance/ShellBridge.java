@@ -44,48 +44,63 @@ public final class ShellBridge {
             return;
         }
 
+        LoopbackAdb.Result r = executeGated(ctx, cmd.template, cmd.args,
+                cmd.id);
+        WorkerClient.postCommandResult(ctx, cmd.id, r.ok, r.stdoutTail,
+                r.ms, r.error);
+        record(ctx, cmd, r.ok, r.ms);
+    }
+
+    /**
+     * The gated execution core, shared by the Worker channel
+     * (tick, above) and the v1.20 local channel (LocalChannel):
+     * the SAME ShellAllowlist gates, the SAME native dispatch,
+     * the SAME loopback execution. Callers own their own result
+     * reporting and bookkeeping. Never throws.
+     */
+    public static LoopbackAdb.Result executeGated(Context ctx,
+            String template, java.util.List<String> args, String logId) {
         // v1.5: native (on-device) templates are gated by the same
         // allowlist class but never become shell text.
-        if (ShellAllowlist.isNativeTemplate(cmd.template)) {
+        if (ShellAllowlist.isNativeTemplate(template)) {
             ShellAllowlist.NativeGate ng =
-                    ShellAllowlist.checkNative(cmd.template, cmd.args);
+                    ShellAllowlist.checkNative(template, args);
             if (!ng.allowed) {
-                BridgeLog.log(ctx, "SHELL", cmd.id + " REFUSED template=" + cmd.template
-                        + ": " + ng.refusal);
-                WorkerClient.postCommandResult(ctx, cmd.id, false, "", 0,
+                BridgeLog.log(ctx, "SHELL", logId + " REFUSED template="
+                        + template + ": " + ng.refusal);
+                return new LoopbackAdb.Result(false, "", 0,
                         "refused: " + ng.refusal);
-                record(ctx, cmd, false, 0);
-                return;
             }
-            LoopbackAdb.Result r = ng.op.startsWith("voice_")
+            LoopbackAdb.Result r = "voice_call".equals(ng.op)
+                    ? VoiceBridge.executeCombined(ctx)
+                    : "voice_bridge".equals(ng.op)
+                    ? VoiceBridge.execute(ctx, ng.arg)
+                    : ng.op.startsWith("voice_")
                     ? VoiceModeModule.execute(ctx, ng.op)
                     : ng.op.startsWith("buds_")
                     ? BudsRouter.execute(ctx, ng.op, ng.arg)
+                    : "wear_install".equals(ng.op)
+                    ? WearInstallRouter.execute(ctx, ng.args)
                     : NativeCommands.execute(ctx, ng.op);
-            BridgeLog.log(ctx, "SHELL", cmd.id + " native " + cmd.template
+            BridgeLog.log(ctx, "SHELL", logId + " native " + template
                     + " -> ok=" + r.ok + " " + r.ms + "ms"
                     + (r.error != null ? " error=" + r.error : ""));
-            WorkerClient.postCommandResult(ctx, cmd.id, r.ok, r.stdoutTail, r.ms, r.error);
-            record(ctx, cmd, r.ok, r.ms);
-            return;
+            return r;
         }
 
-        ShellAllowlist.Gate gate = ShellAllowlist.check(cmd.template, cmd.args);
+        ShellAllowlist.Gate gate = ShellAllowlist.check(template, args);
         if (!gate.allowed) {
-            BridgeLog.log(ctx, "SHELL", cmd.id + " REFUSED template=" + cmd.template
-                    + ": " + gate.refusal);
-            WorkerClient.postCommandResult(ctx, cmd.id, false, "", 0,
+            BridgeLog.log(ctx, "SHELL", logId + " REFUSED template="
+                    + template + ": " + gate.refusal);
+            return new LoopbackAdb.Result(false, "", 0,
                     "refused: " + gate.refusal);
-            record(ctx, cmd, false, 0);
-            return;
         }
 
         LoopbackAdb.Result r = LoopbackAdb.execute(ctx, gate.argv);
-        BridgeLog.log(ctx, "SHELL", cmd.id + " " + ShellAllowlist.describe(gate)
+        BridgeLog.log(ctx, "SHELL", logId + " " + ShellAllowlist.describe(gate)
                 + " -> ok=" + r.ok + " " + r.ms + "ms"
                 + (r.error != null ? " error=" + r.error : ""));
-        WorkerClient.postCommandResult(ctx, cmd.id, r.ok, r.stdoutTail, r.ms, r.error);
-        record(ctx, cmd, r.ok, r.ms);
+        return r;
     }
 
     private static void record(Context ctx, WorkerClient.Command cmd, boolean ok, long ms) {

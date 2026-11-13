@@ -15,8 +15,8 @@ BT="$SDK/build-tools/35.0.0"
 ANDROID_JAR="$SDK/platforms/android-35/android.jar"
 KS="keystore/musephonebridge.keystore"
 KS_PASS_FILE="keystore/keystore-password.txt"
-VERSION_CODE=17
-VERSION_NAME="1.8.0"
+VERSION_CODE=31
+VERSION_NAME="1.20.0"
 PKG_PATH="com/jonathancruzate/metamusedeviceassistance"
 
 rm -rf build
@@ -84,17 +84,42 @@ for libcls in "Lio/github/muntashirakon/adb/AbsAdbConnectionManager;" \
               "Lorg/conscrypt/Conscrypt;" \
               "Landroid/sun/security/x509/X509CertImpl;" \
               "Lorg/bouncycastle/jce/provider/BouncyCastleProvider;" \
-              "Lio/github/muntashirakon/crypto/spake2/Spake2Context;"; do
+              "Lio/github/muntashirakon/crypto/spake2/Spake2Context;" \
+              "Lcom/google/android/gms/wearable/Wearable;" \
+              "Lcom/google/android/gms/wearable/ChannelClient;" \
+              "Lcom/google/android/gms/wearable/WearableListenerService;" \
+              "Landroidx/collection/ArrayMap;"; do
   grep -q "Class descriptor.*$libcls" build/dexdump.txt \
     || { echo "GUARD FAIL: library class $libcls missing from dex" >&2; exit 1; }
 done
-# AndroidX ban (amended for Route B per the design): no androidx class
-# may be DEFINED or referenced, except the compile-time annotation
-# artifact (androidx.annotation) that the named libraries carry —
+# AndroidX discipline (amended twice: Route B, then v1.13 GMS).
+# Route B: no androidx class may be DEFINED or referenced, except
+# the compile-time annotation artifact (androidx.annotation) —
 # annotation classes are stripped by d8 and never execute.
-if grep -E "Landroidx/" build/dexdump.txt | grep -qvE "Landroidx/annotation/"; then
-  echo "GUARD FAIL: non-annotation androidx reference in dex" >&2; exit 1
+# v1.13 (wear_install_face, docs/v1.13-wear-install-2026-11-11.md):
+# the staged GMS set (play-services 19.0.0/18.5.0/18.4.0/18.2.0)
+# legitimately needs androidx.collection DEFINED (its IPC internals
+# use ArrayMap — vendored as the pure-Java collection 1.1.0), and
+# its never-loaded error-dialog helper code carries dangling
+# REFERENCES to androidx.activity / androidx.core / androidx.fragment.
+# Amended rule, enforced below:
+#   (1) DEFINED androidx classes: annotation + collection only.
+#   (2) App-package classes may REFERENCE androidx/annotation only.
+#   (3) Dangling activity/core/fragment references are counted and
+#       logged (they live inside GMS dialog code the Data Layer and
+#       bridge paths never load; ART verifies lazily per class).
+if grep "Class descriptor  : 'Landroidx/" build/dexdump.txt \
+     | grep -qvE "'Landroidx/(annotation|collection)/"; then
+  echo "GUARD FAIL: androidx class defined outside annotation/collection" >&2; exit 1
 fi
+awk -v pkg="com/jonathancruzate/metamusedeviceassistance" '
+  /^Class #[0-9]+/ {cur=""}
+  /Class descriptor/ {cur=$0}
+  cur ~ ("L" pkg "/") && /Landroidx\// && !/Landroidx\/annotation\// {print "app ref: "$0"  <<<  "cur; bad=1}
+  END {exit bad}
+' build/dexdump.txt || { echo "GUARD FAIL: app class references androidx beyond annotation" >&2; exit 1; }
+DANGLING="$(grep -hoE 'Landroidx/(activity|core|fragment)/[A-Za-z0-9/$]+' build/dexdump.txt | sort -u | wc -l)"
+echo "note: $DANGLING distinct dangling androidx activity/core/fragment references (GMS dialog code, never loaded — v1.13 doc)"
 echo "dex guards passed"
 
 echo "== package =="
@@ -116,8 +141,13 @@ echo "== sign =="
 echo "== verify =="
 "$BT/apksigner" verify --print-certs "Muse-Device-Assistance-$VERSION_NAME.apk"
 echo "== guard: native libs packaged =="
+# Capture the listing first: piping unzip into grep -q under
+# pipefail races (grep exits on match, unzip dies of SIGPIPE, the
+# pipeline reports failure for a lib that is present — hit on the
+# v1.13 build, whose APK verifiably contains both .so files).
+APK_LISTING="$(unzip -l "Muse-Device-Assistance-$VERSION_NAME.apk")"
 for so in lib/arm64-v8a/libconscrypt_jni.so lib/arm64-v8a/libspake2.so; do
-  unzip -l "Muse-Device-Assistance-$VERSION_NAME.apk" | grep -q "$so" \
+  grep -q "$so" <<< "$APK_LISTING" \
     || { echo "GUARD FAIL: $so missing from APK" >&2; exit 1; }
 done
 echo "native lib guards passed"

@@ -50,7 +50,7 @@ are the same document — update both in the same handling, always.
   Bridge" was uninstalled after the verified cutover)
 - **Version source of truth:** `app/build.sh` — `VERSION_NAME` /
   `VERSION_CODE` in that script, backed by the build records in
-  `github-export/README.md`. At this writing: **v1.5.1, versionCode 13**
+  `github-export/README.md`. Current: **v1.20.0, versionCode 31** (this line was stale at v1.5.1 until the 2026-11-12 correction; app/build.sh is always the truth)
   (APK `app/Muse-Device-Assistance-1.3.2.apk`, SHA-256
   `3b2adc07d64eb000369f316bfa6f713a376e49c357109aba842166d82ab06166`,
   rebuilt from the renamed canonical tree 2026-11-05.
@@ -1449,3 +1449,34 @@ Full record: `docs/execution-2026-11-09.md` §25. Summary:
   app>`, `PiP return: relaunched <his app>`, and
   `PiP verify: … foreground=<his app>`, and he must land back in
   his app.
+
+
+## v1.20.0 — Muse Launcher Pack local channel (built 2026-11-12)
+
+- **LocalChannel** is a ContentProvider whose only surface is
+  `call()`: methods execute / claim_pairing / pair_status /
+  revoke. It is the pack's on-device command channel (design
+  Section 7.2 as amended at execution: broadcast transport was
+  rejected because a broadcast sender cannot be authenticated).
+  Caller authentication is two-factor: (1) calling package is
+  the Muse Widget app AND its signing cert SHA-256 equals
+  `2746d2a2d6dbe0fda4271acd14f4e5ab990da4e9155e7f9e75ae07fca4b814da`
+  (the widget app's public fingerprint, printed by its own
+  build), (2) the pairing token for execute: generated here
+  when Jonathan taps "Open pairing window" in MainActivity,
+  claimable once inside 5 minutes, stored only in both apps'
+  private prefs, revocable from either app, never logged.
+- Execution reuses **ShellBridge.executeGated** (extracted
+  from tick; the Worker channel now calls it too): identical
+  ShellAllowlist gates, no new verbs. wear_install refused
+  locally; shell templates still require the loopback bridge
+  paired + on. Rate limit 30/min; refusals counted + logged;
+  the synchronous Bundle return is the ack. Report carries
+  `local_channel` (paired/count/last, never the token).
+- **ContextBroadcasts** sends package-scoped CONTEXT_MODE to
+  the pack on observed ground-truth mode changes (poke only).
+- Phase 2 actuation machinery and its arming state are
+  untouched by this version. Build guards + ShellAllowlist
+  gate tests pass (ALL_PASS). APK SHA-256
+  `a935fdf62c02afe98e16cf2eb71627016ac0b562d1b0d271c61a28c4af7be9c5`;
+  staged, not yet installed as of 2026-11-12 (ADB lane down).

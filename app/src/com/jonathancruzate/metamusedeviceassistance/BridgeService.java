@@ -143,8 +143,14 @@ public class BridgeService extends Service {
             TailscaleGuard.tick(this);
             boolean tv = DeviceProfile.isTv(this);
             boolean configured = Store.workerConfigured(this);
+            // v1.9: per-cycle transport health for the probation
+            // fallback below — did this cycle's desired fetch and
+            // report attempt succeed against the current base?
+            boolean fetchOk = false;
+            boolean reportAttempted = false;
+            boolean reportOk = false;
             if (configured && !tv) {
-                WorkerClient.fetchDesired(this);
+                fetchOk = WorkerClient.fetchDesired(this);
                 ShellBridge.tick(this);
             }
             Reconciler.Verdict v = Reconciler.evaluate(this);
@@ -156,10 +162,10 @@ public class BridgeService extends Service {
             if (!tv) {
                 BatteryPush.check(this);
                 // v1.7: observer diffs (calendar/contacts/messages/
-                // call log; dialer pushes live from its callback) +
-                // the throttled Health Connect change-log check.
+                // call log; dialer pushes live from its callback).
+                // (v1.12: the Health Connect change-log check is gone
+                // with its channel — see PushChannels.)
                 if (pushObservers != null) pushObservers.syncDirty();
-                HealthPush.check(this);
                 PushClient.flushQueue(this);
             }
             long gtAt = Store.getLong(this, Store.K_GT_AT, 0);
@@ -167,10 +173,21 @@ public class BridgeService extends Service {
             boolean changed = gtAt != lastReportedGtAt || !v.state.equals(lastReportedVerdict);
             boolean heartbeatDue = System.currentTimeMillis() - lastReport > HEARTBEAT_MS;
             if (configured && (changed || heartbeatDue)) {
-                if (WorkerClient.postReport(this, changed ? "change" : "heartbeat")) {
+                reportAttempted = true;
+                reportOk = WorkerClient.postReport(this, changed ? "change" : "heartbeat");
+                if (reportOk) {
                     lastReportedGtAt = gtAt;
                     lastReportedVerdict = v.state;
                 }
+            }
+            // v1.9 transport probation: within 24 h of a transport
+            // switch, a cycle where BOTH the desired fetch and the
+            // report attempt failed against the new base probes the
+            // previous base once and reverts if it answers (no-op
+            // outside probation or with no previous base stored;
+            // WorkerClient.maybeRevertTransport owns the window).
+            if (configured && !tv && !fetchOk && reportAttempted && !reportOk) {
+                WorkerClient.maybeRevertTransport(this);
             }
             updateNotification(v);
         } catch (Exception e) {

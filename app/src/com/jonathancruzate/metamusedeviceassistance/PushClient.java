@@ -12,31 +12,51 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 /**
- * PushClient (v1.6) — the on-device push transport for the local push
- * replacement (design §3). POSTs one channel's items to Muse's own
- * Worker using the SAME base URL + secret as WorkerClient:
+ * PushClient (v1.6; transport reworked v1.11) — the on-device push
+ * transport for the Device Assistance data channels.
  *
- *   POST {base}/device-push?secret=…
- *        <- {"source":"phone-notify"|"phone-battery"|…,
- *            "ts": <epoch ms>, "items":[ … ]}
+ * v1.11 delivery hierarchy (Jonathan's rulings, 2026-11-10 00:35–00:55
+ * EST — design: docs/direct-to-muse-app-design-2026-11-10.md as
+ * corrected the same night):
  *
- * Discipline:
+ *  Tier 1 — APP-TO-APP LOCAL (the delivery). Every payload is handed
+ *  off on-device into the local outbox (Store.K_PUSH_QUEUE, an in-prefs
+ *  JSON array of {source, ts, items, mirrored} that survives process
+ *  death, capped at 200 entries, oldest dropped). The Muse app
+ *  exposes NO local ingest API (no intent receiver, ContentProvider,
+ *  or file drop in the platform docs; Android sandboxing bars writing
+ *  into its storage), so this on-device store is the closest real
+ *  endpoint the path can terminate at today: the data is ON the phone,
+ *  in this app's store, inspectable via the BridgeLog and the bridge
+ *  report — no Cloudflare Worker, no relay, no mailbox of ours is in
+ *  the path. The channel's cursor / last_push_at advance on this local
+ *  delivery (verify-then-mark against the tier-1 endpoint). The
+ *  residual gap is stated plainly: nothing on the phone currently
+ *  reads this outbox into the Muse app, because no sanctioned
+ *  hand-off surface exists to build that last hop on.
+ *
+ *  Tier 2 — TAILNET BRIDGE (worst case, best-effort mirror). When —
+ *  and only when — the configured base is an https *.ts.net base (the
+ *  Tailscale Serve form, tailnet-only, TLS so the targetSdk-35
+ *  cleartext ban does not apply), the payload is ALSO POSTed to
+ *  {base}/device-push as before. A Worker base, an http base, or any
+ *  other base is never POSTed to from this client: the data channels
+ *  do not speak to Cloudflare at all as of v1.11. Mirror failures are
+ *  logged via BridgeLog; they do NOT mark the channel in error and do
+ *  NOT gate its cursor — the delivery already happened at tier 1.
+ *  flushQueue() (BridgeService cycle) re-attempts the mirror for
+ *  outbox entries not yet mirrored whenever a tailnet bridge base is
+ *  configured; entries stay in the outbox either way (it is the tier-1
+ *  endpoint's store, not a retry queue anymore).
+ *
+ * The control lanes (state report, command channel, mode loop) do NOT
+ * ride this client — they stay on WorkerClient and its rendezvous,
+ * per the design's control-lane treatment.
+ *
+ * Discipline (unchanged from v1.6):
  *  - NEVER call push() on the UI thread; use pushAsync() from UI /
- *    listener callbacks (it spawns a worker thread). push() itself
- *    does blocking HTTP and is for background threads (BridgeService
- *    cycle, listener-spawned threads).
- *  - The channel's cursor / last_push_at advance ONLY on HTTP 2xx
- *    (verify-then-mark, the phone-notify-drain pattern). On success
- *    the channel's last_error is cleared.
- *  - RETRY CHOICE for v1.6 (documented per the task): an in-prefs
- *    queue. A failed payload is appended verbatim to Store.K_PUSH_QUEUE
- *    (a JSON array string in prefs, capped at 200 entries, oldest
- *    dropped) and retried by flushQueue() on the next BridgeService
- *    cycle — no separate scheduler, no data loss across process death
- *    because prefs survive. Failures are logged via BridgeLog ("PUSH")
- *    and recorded in the channel's last_error, which rides the bridge
- *    report's push_channels object, so a failing channel is loud
- *    server-side, never silent.
+ *    listener callbacks. push() itself may block (tier-2 mirror HTTP)
+ *    and is for background threads.
  *  - TV profile: no pushes, ever (phone surfaces gated off).
  *  - The secret is read from Store at call time; never logged.
  */
@@ -45,9 +65,9 @@ public final class PushClient {
 
     private PushClient() {}
 
-    /** Blocking push. Returns true only on HTTP 2xx. */
+    /** Blocking push. Returns true when the tier-1 local hand-off landed. */
     public static boolean push(Context ctx, String source, JSONArray items) {
-        return pushPayload(ctx, source, System.currentTimeMillis(), items, true);
+        return pushPayload(ctx, source, System.currentTimeMillis(), items);
     }
 
     /** Fire-and-forget push on a fresh worker thread. */
@@ -56,18 +76,46 @@ public final class PushClient {
         new Thread(() -> push(app, source, items)).start();
     }
 
-    private static boolean pushPayload(Context ctx, String source, long ts,
-                                       JSONArray items, boolean queueOnFailure) {
+    /** The tier-2 bridge form: https on a tailnet (*.ts.net) name only. */
+    private static boolean isTailnetBridgeBase(String base) {
+        if (base == null) return false;
+        String b = base.trim().toLowerCase();
+        if (!b.startsWith("https://")) return false;
+        String host = b.substring("https://".length());
+        int slash = host.indexOf('/');
+        if (slash >= 0) host = host.substring(0, slash);
+        int colon = host.indexOf(':');
+        if (colon >= 0) host = host.substring(0, colon);
+        return host.endsWith(".ts.net");
+    }
+
+    private static boolean pushPayload(Context ctx, String source, long ts, JSONArray items) {
         PushChannels.Channel ch = PushChannels.bySource(source);
         if (DeviceProfile.isTv(ctx)) return false;
-        if (!Store.workerConfigured(ctx)) {
-            String err = "worker not configured";
+        String base = Store.get(ctx, Store.K_BASE_URL, "").trim();
+        boolean bridge = isTailnetBridgeBase(base);
+        boolean mirrored = false;
+        if (bridge) {
+            mirrored = postToBridge(ctx, base, source, ts, items);
+        }
+        // Tier 1: the local hand-off. This append IS the delivery.
+        if (!enqueue(ctx, source, ts, items, mirrored)) {
+            String err = "local outbox append failed";
             if (ch != null) PushChannels.recordError(ctx, ch, err);
-            BridgeLog.log(ctx, "PUSH", source + " push skipped: " + err);
-            if (queueOnFailure) enqueue(ctx, source, ts, items);
+            BridgeLog.log(ctx, "PUSH", source + " push FAILED: " + err);
             return false;
         }
-        String base = Store.get(ctx, Store.K_BASE_URL, "").trim();
+        if (ch != null) PushChannels.recordSuccess(ctx, ch, System.currentTimeMillis());
+        BridgeLog.log(ctx, "PUSH", source + " push local ok (" + itemsCount(items)
+                + " items)" + (bridge
+                    ? (mirrored ? "; tailnet bridge mirrored" : "; tailnet bridge mirror FAILED (logged, delivery stands)")
+                    : "; no tailnet bridge base — local only"));
+        return true;
+    }
+
+    /** Tier-2 mirror POST (the pre-v1.11 wire shape). True only on HTTP 2xx. */
+    private static boolean postToBridge(Context ctx, String base, String source,
+                                        long ts, JSONArray items) {
         String secret = Store.get(ctx, Store.K_SECRET, "").trim();
         try {
             JSONObject body = new JSONObject();
@@ -81,29 +129,19 @@ public final class PushClient {
             c.setReadTimeout(10000);
             c.setRequestMethod("POST");
             c.setRequestProperty("Content-Type", "application/json");
-            c.setRequestProperty("User-Agent", "MuseDeviceAssistance/1.6");
+            c.setRequestProperty("User-Agent", "MuseDeviceAssistance/1.11");
             c.setDoOutput(true);
             byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
             try (OutputStream os = c.getOutputStream()) {
                 os.write(payload);
             }
             int code = c.getResponseCode();
-            if (code >= 200 && code < 300) {
-                if (ch != null) PushChannels.recordSuccess(ctx, ch, System.currentTimeMillis());
-                BridgeLog.log(ctx, "PUSH", source + " push ok (" + itemsCount(items)
-                        + " items) -> HTTP " + code);
-                return true;
-            }
-            String err = "HTTP " + code;
-            if (ch != null) PushChannels.recordError(ctx, ch, err);
-            BridgeLog.log(ctx, "PUSH", source + " push FAILED -> " + err + " (queued for retry)");
-            if (queueOnFailure) enqueue(ctx, source, ts, items);
+            if (code >= 200 && code < 300) return true;
+            BridgeLog.log(ctx, "PUSH", source + " bridge mirror FAILED -> HTTP " + code);
             return false;
         } catch (Exception e) {
-            String err = e.getClass().getSimpleName() + " " + e.getMessage();
-            if (ch != null) PushChannels.recordError(ctx, ch, err);
-            BridgeLog.log(ctx, "PUSH", source + " push FAILED: " + err + " (queued for retry)");
-            if (queueOnFailure) enqueue(ctx, source, ts, items);
+            BridgeLog.log(ctx, "PUSH", source + " bridge mirror FAILED: "
+                    + e.getClass().getSimpleName() + " " + e.getMessage());
             return false;
         }
     }
@@ -112,20 +150,24 @@ public final class PushClient {
         return items == null ? 0 : items.length();
     }
 
-    // ---- in-prefs retry queue -------------------------------------------
+    // ---- local outbox (the tier-1 endpoint's store) ---------------------
 
-    private static synchronized void enqueue(Context ctx, String source, long ts, JSONArray items) {
+    private static synchronized boolean enqueue(Context ctx, String source, long ts,
+                                                JSONArray items, boolean mirrored) {
         try {
             JSONArray q = queue(ctx);
             JSONObject entry = new JSONObject();
             entry.put("source", source);
             entry.put("ts", ts);
             entry.put("items", items != null ? items : new JSONArray());
+            entry.put("mirrored", mirrored);
             q.put(entry);
             while (q.length() > QUEUE_CAP) q.remove(0);
             Store.put(ctx, Store.K_PUSH_QUEUE, q.toString());
+            return true;
         } catch (Exception e) {
-            BridgeLog.log(ctx, "PUSH", "queue append failed: " + e.getMessage());
+            BridgeLog.log(ctx, "PUSH", "local outbox append failed: " + e.getMessage());
+            return false;
         }
     }
 
@@ -144,41 +186,41 @@ public final class PushClient {
     }
 
     /**
-     * Retry every queued payload once. Called from the BridgeService
-     * cycle (background thread). Entries that succeed are dropped;
-     * entries that fail stay queued (in order) for the next cycle.
-     * A retried entry that succeeds updates its channel's bookkeeping
-     * via the normal push path (queueOnFailure=false so a failure
-     * does not duplicate the entry).
+     * Tier-2 mirror pass over the local outbox. Called from the
+     * BridgeService cycle (background thread). For every entry not yet
+     * mirrored, if a tailnet bridge base is now configured, attempt the
+     * mirror POST and flip the entry's flag on success. Entries are
+     * NEVER dropped here — the outbox is the tier-1 endpoint's store.
+     * Entries for channels Jonathan has since turned OFF are skipped
+     * (never mirrored behind his toggle).
      */
     public static void flushQueue(Context ctx) {
         if (DeviceProfile.isTv(ctx)) return;
+        String base = Store.get(ctx, Store.K_BASE_URL, "").trim();
+        if (!isTailnetBridgeBase(base)) return;
         JSONArray q = queue(ctx);
         if (q.length() == 0) return;
-        JSONArray remaining = new JSONArray();
-        int sent = 0;
+        int mirroredNow = 0;
+        boolean changed = false;
         for (int i = 0; i < q.length(); i++) {
             JSONObject entry = q.optJSONObject(i);
             if (entry == null) continue;
+            if (entry.optBoolean("mirrored", false)) continue;
             String source = entry.optString("source", "");
+            PushChannels.Channel ch = PushChannels.bySource(source);
+            if (ch != null && !PushChannels.isOn(ctx, ch)) continue;
             long ts = entry.optLong("ts", System.currentTimeMillis());
             JSONArray items = entry.optJSONArray("items");
             if (items == null) items = new JSONArray();
-            // Only retry channels Jonathan still has ON — a payload for
-            // a channel he turned OFF is dropped, never pushed behind
-            // his toggle.
-            PushChannels.Channel ch = PushChannels.bySource(source);
-            if (ch != null && !PushChannels.isOn(ctx, ch)) continue;
-            if (pushPayload(ctx, source, ts, items, false)) {
-                sent++;
-            } else {
-                remaining.put(entry);
+            if (postToBridge(ctx, base, source, ts, items)) {
+                try { entry.put("mirrored", true); } catch (Exception ignored) {}
+                mirroredNow++;
+                changed = true;
             }
         }
-        Store.put(ctx, Store.K_PUSH_QUEUE, remaining.toString());
-        if (sent > 0) {
-            BridgeLog.log(ctx, "PUSH", "retry queue flushed: " + sent + " sent, "
-                    + remaining.length() + " remaining");
+        if (changed) Store.put(ctx, Store.K_PUSH_QUEUE, q.toString());
+        if (mirroredNow > 0) {
+            BridgeLog.log(ctx, "PUSH", "tailnet bridge mirror pass: " + mirroredNow + " entries mirrored");
         }
     }
 }

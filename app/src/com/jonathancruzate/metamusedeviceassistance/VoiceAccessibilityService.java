@@ -1,6 +1,8 @@
 package com.jonathancruzate.metamusedeviceassistance;
 
 import android.accessibilityservice.AccessibilityService;
+import android.content.Intent;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.accessibility.AccessibilityEvent;
@@ -24,6 +26,16 @@ import java.util.List;
  *
  *   END: same hunt against Muse's end-call control
  *   (VoiceState.awaitingEndTap), fallback Back -> Home.
+ *
+ *   PiP (v1.10.0): after a self-activated START tap lands and the
+ *   session UI is confirmed present (+ ~900 ms settle), return to
+ *   the app Jonathan was using (recorded pre-launch) — leaving
+ *   aura triggers the voice session's auto-PiP (mechanism
+ *   confirmed by the device owner 2026-11-09; live verification
+ *   pending the joint trial) — or GLOBAL_ACTION_HOME when nothing
+ *   returnable was recorded; the observed PiP result is
+ *   BridgeLog'd, the dossier's minimize hunt remains as fallback
+ *   only, and a full node inventory is dumped once per session.
  *
  * Hunt candidates (REA-derived, identical to the shortcut app and
  * Muse Drive):
@@ -61,8 +73,12 @@ public class VoiceAccessibilityService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event == null || event.getPackageName() == null
-                || !"com.facebook.aura".contentEquals(event.getPackageName())) {
+        if (event == null || event.getPackageName() == null) return;
+        // v1.14: the bridge hunt is not aura-gated — when a bridge
+        // send is pending, any window change is a chance to run it
+        // (the hunt itself launches Muse when it isn't foreground).
+        if (VoiceState.awaitingBridgeSend) scheduleBridgeHunt();
+        if (!"com.facebook.aura".contentEquals(event.getPackageName())) {
             return;
         }
         if (VoiceState.awaitingVoiceTap) scheduleVoiceHunt();
@@ -88,6 +104,11 @@ public class VoiceAccessibilityService extends AccessibilityService {
                 VoiceState.awaitingVoiceTap = false;
                 voiceHuntRunning = false;
                 VoiceLauncher.buzz(VoiceAccessibilityService.this, 80);
+                // v1.10.0: a self-activated session gets one PiP
+                // attempt once its UI is confirmed present.
+                // v1.15: for a combined voice_call, the attempt is
+                // deferred until the marker lands (return is last).
+                schedulePipAttemptAfterTap();
                 return;
             }
             voiceHuntAttempts++;
@@ -109,6 +130,11 @@ public class VoiceAccessibilityService extends AccessibilityService {
         if (voiceHuntRunning) return;
         voiceHuntRunning = true;
         voiceHuntAttempts = 0;
+        // A fresh self-activation re-arms the one-shot PiP attempt
+        // and its once-per-session node inventory (v1.10.0).
+        pipScheduled = false;
+        pipAttemptDone = false;
+        pipDumpDone = false;
         handler.postDelayed(voiceHuntStep, 400);
     }
 
@@ -182,6 +208,413 @@ public class VoiceAccessibilityService extends AccessibilityService {
         return tapByLabel(root, labels);
     }
 
+    // ---- PiP confirmation (v1.10.0) ----
+    //
+    // Ground truth (Jonathan, device owner, 2026-11-09 23:40 EST):
+    // "The app always goes into PiP if voice mode is on" — aura's
+    // voice session auto-PiPs on user-leave. So after a
+    // SELF-ACTIVATED start tap lands (the voice hunt above — the
+    // only path that arms this), wait until the session UI is
+    // confirmed present, settle ~900 ms, then run Jonathan's
+    // choreography (adopted 2026-11-09 23:41 EST): return to the
+    // app he was using before the activation (recorded by
+    // VoiceLauncher before the assist launch; GLOBAL_ACTION_HOME
+    // when nothing returnable was recorded), which floats the
+    // session over that app. Then verify + log whether a PiP
+    // window is actually observed. The dossier's minimize-control
+    // hunt (docs/pip-investigation-2026-11-09.md, Q3) survives
+    // ONLY as the fallback when the return logs "no PiP window
+    // observed" — at most one tap. Before the return, the FULL
+    // node inventory of the Muse voice window is dumped to
+    // BridgeLog once per session (ids + labels) for the record.
+    // PiP itself can never be invoked on aura from outside
+    // (owner-only API); this sequence only performs the user-leave
+    // and, in the fallback, taps aura's own controls.
+
+    private static final String[] PIP_IDS = {
+            "com.facebook.aura:id/hatch-voice-minimize-button",
+            "com.facebook.aura:id/hatch-voice-pip-button",
+            "com.facebook.aura:id/hatch-minimize-button",
+            "com.facebook.aura:id/hatch-voice-collapse-button",
+            "com.facebook.aura:id/minimize_button",
+            "com.facebook.aura:id/pip_button",
+    };
+    private static final String[] PIP_LABELS = {
+            "Minimize", "Picture in picture", "Collapse", "Shrink", "Floating window",
+    };
+    /** Dossier spec: settle ~600–1200 ms after UI_PRESENT. */
+    private static final long PIP_SETTLE_MS = 900;
+
+    private boolean pipScheduled = false;
+    private boolean pipAttemptDone = false;
+    private boolean pipDumpDone = false;
+    private int pipWaitAttempts = 0;
+
+    private void schedulePipAttempt() {
+        // The choke point (v1.17, Jonathan 2026-11-11 20:47 EST —
+        // "Prompt first then back to last app"): while a combined
+        // voice_call's prompt is unsent, NO return path runs, no
+        // matter which caller asks. The return is released only
+        // by onMarkerResolved (which clears combinedCallPending
+        // first) or the watchdog's never-strand exception. This
+        // makes the order structural, not a convention each call
+        // site must remember.
+        if (VoiceState.combinedCallPending) {
+            pipDeferredForMarker = true;
+            BridgeLog.log(this, "VOICE",
+                    "voice_call: return held at the gate"
+                    + " (prompt not sent yet)");
+            return;
+        }
+        if (pipScheduled || pipAttemptDone) return;
+        pipScheduled = true;
+        pipWaitAttempts = 0;
+        handler.postDelayed(pipWaitStep, 500);
+    }
+
+    private final Runnable pipWaitStep = new Runnable() {
+        @Override
+        public void run() {
+            if (!VoiceState.isActive(VoiceAccessibilityService.this)
+                    || VoiceState.awaitingEndTap) {
+                pipScheduled = false;
+                maybeRelock("PiP wait moot - session gone");
+                return;
+            }
+            if (observeVoiceSessionUi() == UI_PRESENT) {
+                handler.postDelayed(pipDoStep, PIP_SETTLE_MS);
+                return;
+            }
+            pipWaitAttempts++;
+            if (pipWaitAttempts >= 14) { // ~10 s: session never rendered
+                pipScheduled = false;
+                pipAttemptDone = true;
+                BridgeLog.log(VoiceAccessibilityService.this, "VOICE",
+                        "PiP attempt aborted: session UI never confirmed present");
+                maybeRelock("PiP attempt aborted");
+                return;
+            }
+            handler.postDelayed(this, 700);
+        }
+    };
+
+    private final Runnable pipDoStep = new Runnable() {
+        @Override
+        public void run() {
+            pipScheduled = false;
+            if (pipAttemptDone) return;
+            pipAttemptDone = true;
+            if (!VoiceState.isActive(VoiceAccessibilityService.this)) {
+                BridgeLog.log(VoiceAccessibilityService.this, "VOICE",
+                        "PiP step skipped: session no longer believed active");
+                maybeRelock("PiP step skipped");
+                return;
+            }
+            dumpSessionInventoryOnce();
+            // Jonathan's choreography (2026-11-09 23:41 EST): go
+            // back to the app he was using. Leaving aura is the
+            // user-leave that triggers the voice session's auto-PiP
+            // (device-owner confirmed 2026-11-09: the app always
+            // goes into PiP if voice mode is on), so the session
+            // floats over his app instead of dumping him on the
+            // launcher. No recorded app (or it was the launcher)
+            // -> GLOBAL_ACTION_HOME, the equivalent landing.
+            String target = VoiceState.returnTargetPkg;
+            if (target != null && relaunchPackage(target)) {
+                BridgeLog.log(VoiceAccessibilityService.this, "VOICE",
+                        "PiP return: relaunched " + target
+                                + " (recorded foreground; leaving aura triggers auto-PiP)");
+            } else {
+                boolean home = performGlobalAction(GLOBAL_ACTION_HOME);
+                BridgeLog.log(VoiceAccessibilityService.this, "VOICE",
+                        "PiP return: GLOBAL_ACTION_HOME fired=" + home
+                                + (target == null
+                                        ? " (no returnable app recorded)"
+                                        : " (relaunch of " + target + " failed)"));
+            }
+            handler.postDelayed(pipVerifyStep, 1200);
+        }
+    };
+
+    private final Runnable pipVerifyStep = new Runnable() {
+        @Override
+        public void run() {
+            boolean pip = pipWindowObserved();
+            BridgeLog.log(VoiceAccessibilityService.this, "VOICE",
+                    "PiP verify: pipWindowObserved=" + pip
+                            + " foreground=" + activeRootPackage()
+                            + " sessionUi=" + uiName(observeVoiceSessionUi()));
+            if (pip) {
+                maybeRelock("return complete, session floating");
+                return;
+            }
+            // Fallback only (dossier Q3): the return did not produce
+            // an observed PiP window, so try aura's own minimize
+            // control — at most one tap.
+            AccessibilityNodeInfo root = auraSessionRoot();
+            String tapped = (root == null) ? null : tryTapPipControl(root);
+            if (tapped != null) {
+                BridgeLog.log(VoiceAccessibilityService.this, "VOICE",
+                        "PiP fallback: minimize control tapped (" + tapped + ")");
+                handler.postDelayed(pipFinalStep, 1200);
+            } else {
+                BridgeLog.log(VoiceAccessibilityService.this, "VOICE",
+                        "PiP fallback: no PiP window observed and no minimize "
+                                + "control found; session left as-is");
+                maybeRelock("return settled without PiP");
+            }
+        }
+    };
+
+    private final Runnable pipFinalStep = new Runnable() {
+        @Override
+        public void run() {
+            BridgeLog.log(VoiceAccessibilityService.this, "VOICE",
+                    "PiP final: pipWindowObserved=" + pipWindowObserved()
+                            + " foreground=" + activeRootPackage()
+                            + " sessionUi=" + uiName(observeVoiceSessionUi()));
+            maybeRelock("PiP final");
+        }
+    };
+
+    /** The package of the active window's root, unfiltered (null
+     *  when nothing is observable). */
+    private String activeRootPackage() {
+        try {
+            AccessibilityNodeInfo r = getRootInActiveWindow();
+            if (r != null && r.getPackageName() != null) return r.getPackageName().toString();
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    /** Foreground package worth returning to after a voice start:
+     *  the foreground APPLICATION's package, skipping aura itself,
+     *  our own package, and the launcher (returning to the launcher
+     *  is what GLOBAL_ACTION_HOME already does). Null when none
+     *  qualifies.
+     *
+     *  The scan is restricted to TYPE_APPLICATION windows: the
+     *  window list also carries system overlays — Samsung One Hand
+     *  Operation + (Good Lock) keeps a persistent TYPE_APPLICATION_
+     *  OVERLAY edge-handle window on screen — and an overlay is
+     *  never the app Jonathan was using. The pre-fix scan iterated
+     *  getWindows() unfiltered, so when the active root came back
+     *  null / aura / us / launcher, the fallback could record the
+     *  One Hand overlay's package as the "foreground app" and the
+     *  PiP return then relaunched One Hand Operation + instead of
+     *  his app (Jonathan's bug report, 2026-11-11 ~02:50 EST;
+     *  worked before v1.10.0 only because the pre-PiP flow never
+     *  relaunched a recorded package at all). The recorded package
+     *  is logged at capture (VoiceLauncher) so a bad capture is
+     *  visible in the BridgeLog instead of only at return time. */
+    public String currentForegroundPackage() {
+        String pkg = activeRootPackage();
+        if (isReturnable(pkg)) return pkg;
+        try {
+            List<AccessibilityWindowInfo> wins = getWindows();
+            if (wins != null) {
+                for (AccessibilityWindowInfo w : wins) {
+                    if (w == null || w.getType()
+                            != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                    AccessibilityNodeInfo r = null;
+                    try { r = w.getRoot(); } catch (Exception ignored) {}
+                    if (r != null && r.getPackageName() != null
+                            && isReturnable(r.getPackageName().toString())) {
+                        return r.getPackageName().toString();
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private boolean isReturnable(String pkg) {
+        return pkg != null
+                && !"com.facebook.aura".contentEquals(pkg)
+                && !getPackageName().contentEquals(pkg)
+                && !isLauncherPackage(pkg)
+                // Samsung One Hand Operation + (Good Lock): a
+                // gesture-overlay utility, never an app Jonathan
+                // was "using" — belt-and-braces alongside the
+                // TYPE_APPLICATION filter above, in case a future
+                // One Hand build presents an application window.
+                && !"com.samsung.android.sidegesturepad".contentEquals(pkg);
+    }
+
+    private String homePackageCache = null;
+    private boolean isLauncherPackage(String pkg) {
+        if (pkg == null) return false;
+        if (homePackageCache == null) {
+            try {
+                android.content.Intent home = new android.content.Intent(
+                        android.content.Intent.ACTION_MAIN);
+                home.addCategory(android.content.Intent.CATEGORY_HOME);
+                android.content.pm.ResolveInfo ri =
+                        getPackageManager().resolveActivity(home, 0);
+                if (ri != null && ri.activityInfo != null) {
+                    homePackageCache = ri.activityInfo.packageName;
+                }
+            } catch (Exception ignored) {}
+            if (homePackageCache == null) homePackageCache = "";
+        }
+        return pkg.equals(homePackageCache)
+                || "com.sec.android.app.launcher".contentEquals(pkg)
+                || "com.google.android.apps.nexuslauncher".contentEquals(pkg)
+                || "com.android.launcher3".contentEquals(pkg);
+    }
+
+    private boolean relaunchPackage(String pkg) {
+        try {
+            android.content.Intent launch =
+                    getPackageManager().getLaunchIntentForPackage(pkg);
+            if (launch == null) return false;
+            launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(launch);
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    /** A floating PiP window presents as an aura window much
+     *  smaller than the display while another app holds the active
+     *  window. Heuristic, logged with its inputs at verify time. */
+    private boolean pipWindowObserved() {
+        try {
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            List<AccessibilityWindowInfo> wins = getWindows();
+            if (wins == null) return false;
+            for (AccessibilityWindowInfo w : wins) {
+                AccessibilityNodeInfo r = null;
+                try { r = w.getRoot(); } catch (Exception ignored) {}
+                if (r != null && "com.facebook.aura".contentEquals(r.getPackageName())) {
+                    android.graphics.Rect b = new android.graphics.Rect();
+                    w.getBoundsInScreen(b);
+                    if (b.width() > 0 && b.height() > 0
+                            && b.width() <= 0.65 * dm.widthPixels
+                            && b.height() <= 0.65 * dm.heightPixels) {
+                        return true;
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private String uiName(int ui) {
+        return ui == UI_PRESENT ? "PRESENT" : ui == UI_ABSENT ? "ABSENT" : "UNKNOWN";
+    }
+
+    /** Returns a description of the branch + candidate that landed,
+     *  or null if no candidate was found/tappable. At most one tap. */
+    private String tryTapPipControl(AccessibilityNodeInfo root) {
+        for (String id : PIP_IDS) {
+            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(id);
+            if (nodes != null && !nodes.isEmpty() && clickNode(nodes.get(0))) {
+                return "branch=id candidate=" + id;
+            }
+        }
+        for (String label : PIP_LABELS) {
+            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText(label);
+            if (nodes != null) {
+                for (AccessibilityNodeInfo n : nodes) {
+                    CharSequence t = n.getText();
+                    CharSequence d = n.getContentDescription();
+                    if ((t != null && label.equalsIgnoreCase(t.toString()))
+                            || (d != null && label.equalsIgnoreCase(d.toString()))) {
+                        if (clickNode(n)) return "branch=label candidate=" + label;
+                    }
+                }
+            }
+            if (searchByDescription(root, label)) {
+                return "branch=label candidate=" + label;
+            }
+        }
+        return null;
+    }
+
+    /** A Muse root that carries the session UI, searching the
+     *  active window then every window (mirrors observeVoiceSessionUi's
+     *  traversal). Null if no Muse window is observable. */
+    private AccessibilityNodeInfo auraSessionRoot() {
+        AccessibilityNodeInfo active = null;
+        try { active = getRootInActiveWindow(); } catch (Exception ignored) {}
+        if (active != null && "com.facebook.aura".contentEquals(active.getPackageName())
+                && containsSessionUi(active)) {
+            return active;
+        }
+        try {
+            List<AccessibilityWindowInfo> wins = getWindows();
+            if (wins != null) {
+                for (AccessibilityWindowInfo w : wins) {
+                    AccessibilityNodeInfo r = null;
+                    try { r = w.getRoot(); } catch (Exception ignored) {}
+                    if (r != null && "com.facebook.aura".contentEquals(r.getPackageName())
+                            && containsSessionUi(r)) {
+                        return r;
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return active != null && "com.facebook.aura".contentEquals(active.getPackageName())
+                ? active : null;
+    }
+
+    /** Once per session: dump the full accessibility node inventory
+     *  of the Muse voice window(s) to BridgeLog — view-ids, class,
+     *  text, content-description, clickable — so the dossier's Q3
+     *  minimize candidates can be confirmed or struck from real
+     *  evidence after the first live trial. */
+    private void dumpSessionInventoryOnce() {
+        if (pipDumpDone) return;
+        pipDumpDone = true;
+        java.util.Set<AccessibilityNodeInfo> seen =
+                new java.util.HashSet<AccessibilityNodeInfo>();
+        int[] count = {0};
+        BridgeLog.log(this, "VOICE", "PiP inventory dump: begin");
+        AccessibilityNodeInfo active = null;
+        try { active = getRootInActiveWindow(); } catch (Exception ignored) {}
+        if (active != null && "com.facebook.aura".contentEquals(active.getPackageName())) {
+            dumpNodeTree(active, 0, seen, count);
+        }
+        try {
+            List<AccessibilityWindowInfo> wins = getWindows();
+            if (wins != null) {
+                for (AccessibilityWindowInfo w : wins) {
+                    AccessibilityNodeInfo r = null;
+                    try { r = w.getRoot(); } catch (Exception ignored) {}
+                    if (r != null && "com.facebook.aura".contentEquals(r.getPackageName())) {
+                        dumpNodeTree(r, 0, seen, count);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        BridgeLog.log(this, "VOICE",
+                "PiP inventory dump: end (" + count[0] + " nodes)");
+    }
+
+    private void dumpNodeTree(AccessibilityNodeInfo node, int depth,
+                              java.util.Set<AccessibilityNodeInfo> seen, int[] count) {
+        if (node == null || count[0] >= 400 || !seen.add(node)) return;
+        count[0]++;
+        StringBuilder sb = new StringBuilder("PiP node d=").append(depth);
+        try {
+            String vid = node.getViewIdResourceName();
+            sb.append(" id=").append(vid == null ? "-" : vid);
+            CharSequence cls = node.getClassName();
+            sb.append(" class=").append(cls == null ? "-" : cls.toString());
+            CharSequence t = node.getText();
+            if (t != null && t.length() > 0) sb.append(" text=\"").append(t).append("\"");
+            CharSequence d = node.getContentDescription();
+            if (d != null && d.length() > 0) sb.append(" desc=\"").append(d).append("\"");
+            sb.append(" clickable=").append(node.isClickable());
+        } catch (Exception ignored) {}
+        BridgeLog.log(this, "VOICE", sb.toString());
+        for (int i = 0; i < node.getChildCount(); i++) {
+            dumpNodeTree(node.getChild(i), depth + 1, seen, count);
+        }
+    }
+
     // ---- session-UI observation + external-end reconciliation (v1.5.2) ----
 
     /** Observation outcomes for observeVoiceSessionUi(). */
@@ -209,6 +642,50 @@ public class VoiceAccessibilityService extends AccessibilityService {
     private static final String[] SESSION_LABELS = {
             "End voice call", "End call", "Hang up", "Leave call", "Mute voice call",
     };
+
+    /** The CONNECTED-only marker (v1.17): the end-call button and
+     *  the floating controls render during the CONNECTING screen
+     *  too, so the generic session-UI probe trips seconds before
+     *  the session is actually live (measured 2026-11-11 20:46
+     *  EST: prompt typed + return released off the connecting UI
+     *  while the session start landed ~5 s later — Jonathan:
+     *  "it went back before the prompt was sent"). The
+     *  hatch-voice-call-connected node is the build's own
+     *  connected-state element; the voice_call hook (v1.16) keys
+     *  on this alone from v1.17 on. */
+    private static final String CONNECTED_ID =
+            "com.facebook.aura:id/hatch-voice-call-connected";
+
+    /** UI_PRESENT only when the CONNECTED marker is on screen in
+     *  an aura window; same scan shape as observeVoiceSessionUi. */
+    public int observeVoiceConnected() {
+        AccessibilityNodeInfo active = null;
+        try { active = getRootInActiveWindow(); } catch (Exception ignored) {}
+        if (active != null && "com.facebook.aura".contentEquals(active.getPackageName())
+                && containsConnected(active)) {
+            return UI_PRESENT;
+        }
+        try {
+            List<AccessibilityWindowInfo> wins = getWindows();
+            if (wins != null) {
+                for (AccessibilityWindowInfo w : wins) {
+                    AccessibilityNodeInfo r = null;
+                    try { r = w.getRoot(); } catch (Exception ignored) {}
+                    if (r != null && "com.facebook.aura".contentEquals(r.getPackageName())
+                            && containsConnected(r)) {
+                        return UI_PRESENT;
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return UI_ABSENT;
+    }
+
+    private boolean containsConnected(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> nodes =
+                root.findAccessibilityNodeInfosByViewId(CONNECTED_ID);
+        return nodes != null && !nodes.isEmpty();
+    }
 
     /** Observe whether Muse's voice-session UI is present, across
      *  the active window and every interactive window the service
@@ -322,6 +799,326 @@ public class VoiceAccessibilityService extends AccessibilityService {
                 < VoiceState.DISPATCH_GRACE_MS) return;
         sessionEndCheckPending = true;
         handler.postDelayed(sessionEndCheck, 2500);
+    }
+
+    // ---- BRIDGE hunt (v1.14) ----
+    // Types a bridge message into the Muse app's main-conversation
+    // composer and sends it AS Jonathan (his rule, 2026-11-09
+    // 00:04 EST, re-taught 2026-11-11 01:20 EST): a voice session
+    // only hears the conversation's own user turns, and this
+    // service is the only hands that can produce one. Flow: bring
+    // Muse forward if needed, find the editable composer,
+    // ACTION_SET_TEXT, tap Send. Every outcome is BridgeLog'd;
+    // a failed hunt fails loud, never silently.
+
+    private int bridgeAttempts = 0;
+    private boolean bridgeRunning = false;
+    private boolean bridgeLaunchedApp = false;
+    /** Consecutive CONNECTED polls for the v1.17 sustained gate. */
+    private int holdConnectedStreak = 0;
+
+    /** Entry from VoiceBridge (command thread): kick the hunt on
+     *  this service's main-looper handler. */
+    public void kickBridgeHunt() {
+        handler.post(bridgeStep);
+    }
+
+    private void scheduleBridgeHunt() {
+        if (!bridgeRunning) handler.post(bridgeStep);
+    }
+
+    // ---- Combined voice_call sequencing (v1.15) ----
+    // Jonathan's order (2026-11-11 12:24 EST): type while the app
+    // is open; the back-to-the-last-app return is the LAST step.
+    // So for a combined fire, the activation's PiP attempt is
+    // DEFERRED until the bridge hunt resolves (sent or failed) —
+    // the return can never yank Muse away mid-typing — and the
+    // watchdog forces the return if the marker stalls, so he is
+    // never stranded in the Muse app.
+
+    private boolean pipDeferredForMarker = false;
+
+    /** Called from the voice hunt the moment the start tap lands:
+     *  schedule the PiP attempt now, or hold it for the marker. */
+    private void schedulePipAttemptAfterTap() {
+        if (VoiceState.combinedCallPending) {
+            pipDeferredForMarker = true;
+            BridgeLog.log(this, "VOICE",
+                    "voice_call: PiP return deferred until marker lands");
+            return;
+        }
+        schedulePipAttempt();
+    }
+
+    /** Called when the bridge hunt resolves (sent or failed):
+     *  release a deferred PiP return, completing the sequence. */
+    /** Re-lock at the end of a sequence we had to unlock for
+     *  (v1.19, Jonathan: "try to unlock the phone and then lock
+     *  it again"): restores the phone to the locked state he
+     *  left it in. Fires only when WE did the unlocking; a
+     *  sequence on an already-unlocked phone never locks him
+     *  out of his own session. */
+    private void maybeRelock(String where) {
+        if (!VoiceState.weUnlockedPhone) return;
+        VoiceState.weUnlockedPhone = false;
+        boolean ok = false;
+        try {
+            ok = performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN);
+        } catch (Exception ignored) {}
+        BridgeLog.log(this, "VOICE", "relock (" + where + "): "
+                + (ok ? "phone locked again" : "LOCK_SCREEN action failed"));
+    }
+
+    /** How long the return waits after the prompt is sent
+     *  (v1.18, Jonathan 2026-11-11 21:02 EST — "you don't wait
+     *  long enough after sending the prompt for the agent to
+     *  process it"). Sending the marker is not the finish line:
+     *  the session-side agent still has to process the turn,
+     *  gather the context, generate, and start speaking, and a
+     *  PiP return inside that window yanks the UI away
+     *  mid-processing (attempt 6: return landed, nothing was
+     *  spoken). Measured marker-to-speech in attempt 5 was
+     *  ~13-18 s; the dwell gives processing a 20 s head start
+     *  so speech is underway before the float-back. */
+    private static final long POST_SEND_DWELL_MS = 20000;
+
+    private void onMarkerResolved() {
+        VoiceState.combinedCallPending = false;
+        VoiceState.holdBridgeForSessionLive = false;
+        if (!pipDeferredForMarker) return;
+        pipDeferredForMarker = false;
+        BridgeLog.log(this, "VOICE",
+                "voice_call: prompt sent - dwelling 20s for the"
+                + " agent to process before the return");
+        handler.postDelayed(() -> {
+            BridgeLog.log(VoiceAccessibilityService.this, "VOICE",
+                    "voice_call: dwell over - return to last app now");
+            schedulePipAttempt();
+        }, POST_SEND_DWELL_MS);
+    }
+
+    /** If the marker stalls (hunt retries exhausted without a
+     *  terminal callback, or the voice tap never landed), never
+     *  strand him in Muse: force the deferred return and clear
+     *  the sequence. 50 s since v1.16: the session-live hold can
+     *  legitimately hold the prompt up to 30 s before typing even
+     *  starts, and the typing hunt gets its own ~17 s after that. */
+    public void armCombinedWatchdog() {
+        handler.postDelayed(combinedWatchdog, 50000);
+    }
+
+    private final Runnable combinedWatchdog = new Runnable() {
+        @Override
+        public void run() {
+            if (!VoiceState.combinedCallPending) return;
+            // v1.19: an unlock attempt in flight is progress, not
+            // a stall — the keyguard poll gets up to 15 s and the
+            // launch only starts after it. Re-arm instead of
+            // forcing the return into a still-locked phone.
+            if (VoiceState.unlockInFlight) {
+                BridgeLog.log(VoiceAccessibilityService.this, "VOICE",
+                        "voice_call: watchdog re-armed (unlock in flight)");
+                handler.postDelayed(this, 20000);
+                return;
+            }
+            BridgeLog.log(VoiceAccessibilityService.this, "VOICE",
+                    "voice_call: watchdog forcing deferred return"
+                    + " (marker still pending=" 
+                    + VoiceState.awaitingBridgeSend + ")");
+            onMarkerResolved();
+        }
+    };
+
+    private final Runnable bridgeStep = new Runnable() {
+        @Override
+        public void run() {
+            if (!VoiceState.awaitingBridgeSend) {
+                bridgeRunning = false;
+                return;
+            }
+            bridgeRunning = true;
+            // The session-live hook (v1.16, Jonathan 2026-11-11
+            // 20:15 EST): a combined fire holds its prompt until
+            // the voice session is mechanically detected live, so
+            // the prompt lands as a LIVE-session user turn — a
+            // prompt typed before the session exists becomes
+            // pre-session history and the opener ignores it
+            // (measured twice, 2026-11-11 19:46 + 20:04 EST; the
+            // proven speak-first at 12:10 had the prompt arrive
+            // ~23 s after the start, into the live session). Poll
+            // every 500 ms; at the hold deadline, type anyway —
+            // the fallback keeps a fire from never landing.
+            if (VoiceState.holdBridgeForSessionLive) {
+                // v1.17: CONNECTED-only + sustained. The generic
+                // session UI (end-call button) renders on the
+                // connecting screen and released the prompt (and,
+                // through it, the return) seconds before the
+                // session was truly live. The prompt now waits for
+                // the connected marker on two consecutive polls
+                // (~1 s sustained) — prompt first, in a genuinely
+                // live session, then back (Jonathan, 2026-11-11
+                // 20:47 EST).
+                if (observeVoiceConnected() == UI_PRESENT) {
+                    holdConnectedStreak++;
+                    if (holdConnectedStreak >= 2) {
+                        VoiceState.holdBridgeForSessionLive = false;
+                        holdConnectedStreak = 0;
+                        BridgeLog.log(VoiceAccessibilityService.this,
+                                "VOICE", "voice_call: session"
+                                + " CONNECTED (sustained) - firing"
+                                + " the prompt now");
+                    } else {
+                        handler.postDelayed(this, 500);
+                        return;
+                    }
+                } else if (System.currentTimeMillis()
+                        < VoiceState.bridgeHoldDeadlineMs) {
+                    holdConnectedStreak = 0;
+                    handler.postDelayed(this, 500);
+                    return;
+                } else {
+                    VoiceState.holdBridgeForSessionLive = false;
+                    holdConnectedStreak = 0;
+                    BridgeLog.log(VoiceAccessibilityService.this,
+                            "VOICE", "voice_call: session-connected"
+                            + " not detected in 30s - typing anyway"
+                            + " (fallback)");
+                }
+            }
+            if (tryBridgeSend()) {
+                VoiceState.awaitingBridgeSend = false;
+                VoiceState.bridgeText = null;
+                bridgeRunning = false;
+                bridgeAttempts = 0;
+                bridgeLaunchedApp = false;
+                BridgeLog.log(VoiceAccessibilityService.this, "VOICE",
+                        "bridge sent: message delivered into the main conversation");
+                onMarkerResolved();
+                return;
+            }
+            bridgeAttempts++;
+            if (bridgeAttempts >= 24) { // ~17 s of retries, then stop loud
+                VoiceState.awaitingBridgeSend = false;
+                VoiceState.bridgeText = null;
+                bridgeRunning = false;
+                bridgeAttempts = 0;
+                bridgeLaunchedApp = false;
+                BridgeLog.log(VoiceAccessibilityService.this, "VOICE",
+                        "bridge FAILED: composer/send never became reachable");
+                onMarkerResolved();
+                return;
+            }
+            handler.postDelayed(this, 700);
+        }
+    };
+
+    private boolean tryBridgeSend() {
+        String text = VoiceState.bridgeText;
+        if (text == null) return true; // nothing pending; treat as done
+        AccessibilityNodeInfo root = auraRootAnyWindow();
+        if (root == null) {
+            if (!bridgeLaunchedApp) {
+                bridgeLaunchedApp = launchAuraMain();
+                BridgeLog.log(this, "VOICE", "bridge: Muse not foreground, launch="
+                        + bridgeLaunchedApp);
+            }
+            return false;
+        }
+        AccessibilityNodeInfo editable = findEditable(root);
+        if (editable == null) return false;
+        Bundle args = new Bundle();
+        args.putCharSequence(
+                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
+        if (!editable.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+            editable.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+            if (!editable.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                return false;
+            }
+        }
+        AccessibilityNodeInfo send = findSendButton(root);
+        if (send == null) return false;
+        boolean clicked = clickNode(send);
+        if (clicked) {
+            BridgeLog.log(this, "VOICE", "bridge: text set + send tapped");
+        }
+        return clicked;
+    }
+
+    /** Muse's root node from any window (the chat may not be the
+     *  active window while a voice session floats over it). */
+    private AccessibilityNodeInfo auraRootAnyWindow() {
+        try {
+            List<AccessibilityWindowInfo> wins = getWindows();
+            if (wins != null) {
+                for (AccessibilityWindowInfo w : wins) {
+                    AccessibilityNodeInfo r = w.getRoot();
+                    if (r != null && r.getPackageName() != null
+                            && "com.facebook.aura".contentEquals(r.getPackageName())) {
+                        return r;
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return museRoot();
+    }
+
+    private boolean launchAuraMain() {
+        try {
+            Intent launch = getPackageManager()
+                    .getLaunchIntentForPackage("com.facebook.aura");
+            if (launch == null) return false;
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(launch);
+            return true;
+        } catch (Exception e) {
+            BridgeLog.log(this, "VOICE", "bridge: Muse launch failed: "
+                    + e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
+    private AccessibilityNodeInfo findEditable(AccessibilityNodeInfo node) {
+        if (node == null) return null;
+        if (node.isEditable()) return node;
+        CharSequence cls = node.getClassName();
+        if (cls != null && "android.widget.EditText".contentEquals(cls)) return node;
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo hit = findEditable(node.getChild(i));
+            if (hit != null) return hit;
+        }
+        return null;
+    }
+
+    private AccessibilityNodeInfo findSendButton(AccessibilityNodeInfo root) {
+        String[] ids = {
+                "com.facebook.aura:id/send_button",
+                "com.facebook.aura:id/hatch_send_button",
+                "com.facebook.aura:id/composer_send_button",
+                "com.facebook.aura:id/send",
+        };
+        for (String id : ids) {
+            List<AccessibilityNodeInfo> nodes =
+                    root.findAccessibilityNodeInfosByViewId(id);
+            if (nodes != null && !nodes.isEmpty()) return nodes.get(0);
+        }
+        return findSendInTree(root);
+    }
+
+    private AccessibilityNodeInfo findSendInTree(AccessibilityNodeInfo node) {
+        if (node == null) return null;
+        if (node.isClickable()) {
+            CharSequence d = node.getContentDescription();
+            CharSequence t = node.getText();
+            if ((d != null && d.toString().toLowerCase().contains("send"))
+                    || (t != null && "Send".equalsIgnoreCase(t.toString()))) {
+                return node;
+            }
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo hit = findSendInTree(node.getChild(i));
+            if (hit != null) return hit;
+        }
+        return null;
     }
 
     // ---- shared helpers ----

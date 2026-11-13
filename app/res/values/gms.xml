@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      google_play_services_version for the staged GMS set
+      (play-services-wearable 19.0.0 / base 18.5.0 / basement 18.4.0 /
+      tasks 18.2.0, added in v1.13 for wear_install_face routing).
+      The value is read from the basement AAR's own
+      res/values/values.xml (12451000) and defined here because this
+      raw toolchain does no AAR resource merging. The manifest's
+      com.google.android.gms.version meta-data references it.
+    -->
+    <integer name="google_play_services_version">12451000</integer>
+</resources>

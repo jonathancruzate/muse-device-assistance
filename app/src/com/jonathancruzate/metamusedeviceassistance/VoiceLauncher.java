@@ -41,6 +41,40 @@ public final class VoiceLauncher {
     }
 
     public static void launchVoice(Context ctx) {
+        // Locked-screen gate (v1.19): if the keyguard is locked,
+        // defer into the unlock trampoline and let its success
+        // path re-enter launchVoice once the phone is actually
+        // unlocked. Hunting for Muse's buttons on a locked
+        // screen is how attempt 9 died silently (2026-11-12
+        // 00:14 EST).
+        if (!VoiceState.unlockInFlight && UnlockActivity.isLocked(ctx)) {
+            VoiceState.unlockInFlight = true;
+            VoiceState.pendingVoiceLaunch = true;
+            BridgeLog.log(ctx, "VOICE",
+                    "launch deferred: screen locked - unlock attempt first");
+            UnlockActivity.start(ctx.getApplicationContext());
+            return;
+        }
+        // Record where Jonathan was BEFORE Muse opens (v1.10.0):
+        // the PiP sequence returns to this app after the session
+        // connects. The accessibility service reads the foreground;
+        // without the service there is no recording and the PiP
+        // step falls back to GLOBAL_ACTION_HOME.
+        VoiceState.returnTargetPkg = null;
+        VoiceAccessibilityService a11y0 = VoiceAccessibilityService.instance;
+        if (a11y0 != null) {
+            try { VoiceState.returnTargetPkg = a11y0.currentForegroundPackage(); }
+            catch (Exception ignored) {}
+        }
+        // Log the capture itself (2026-11-11): a wrong return
+        // target (e.g. an overlay utility recorded as "foreground")
+        // was previously invisible until the PiP return acted on
+        // it. Null is a legitimate outcome (launcher/aura/us in
+        // front) and falls back to GLOBAL_ACTION_HOME at return.
+        BridgeLog.log(ctx, "VOICE", "return target recorded: "
+                + (VoiceState.returnTargetPkg == null
+                        ? "(none — PiP return will use HOME)"
+                        : VoiceState.returnTargetPkg));
         // Arm the hunt + flip the switch FIRST: the Muse window can
         // appear before a later set would land.
         VoiceState.awaitingEndTap = false;
@@ -52,6 +86,7 @@ public final class VoiceLauncher {
 
     public static void endVoice(Context ctx) {
         VoiceState.awaitingVoiceTap = false;
+        VoiceState.returnTargetPkg = null;
         VoiceState.awaitingEndTap = true;
         VoiceState.setActive(ctx, false);
         VoiceState.lastEndDispatchMs = System.currentTimeMillis();

@@ -59,14 +59,11 @@
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
-    <!-- v1.7 Health Connect: framework HC permissions (per-type grants
-         managed in the Health Connect app, not the runtime dialog).
-         HealthPush reads via android.health.connect.HealthConnectManager
-         change logs — no androidx HC library is used. -->
-    <uses-permission android:name="android.permission.health.READ_SLEEP" />
-    <uses-permission android:name="android.permission.health.READ_STEPS" />
-    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
-    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+    <!-- v1.12: the v1.7 Health Connect channel and its framework HC
+         permission declarations (health.READ_SLEEP/STEPS/HEART_RATE/
+         EXERCISE) are REMOVED — health data is owned by the Muse
+         app's Health Connect permission + the Health Connect
+         connector, never by this app (Jonathan's order, 2026-11-10). -->
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
     <!-- TV profile (v1.5.0): declare Leanback as optional so the same
          APK installs on Android TV (Shield) and phones alike. -->
@@ -85,7 +82,15 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="false"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@android:style/Theme.Material">
+
+        <!-- v1.13: GMS version for the staged play-services-wearable
+             set; the integer lives in res/values/gms.xml (read from
+             the basement AAR — this raw toolchain does no AAR
+             resource merging). -->
+        <meta-data android:name="com.google.android.gms.version"
+            android:value="@integer/google_play_services_version" />
 
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
@@ -95,9 +100,30 @@
             </intent-filter>
         </activity>
 
+        <!-- Locked-screen trampoline (v1.19): wakes the display,
+             shows over the keyguard, and asks the system to
+             dismiss it so a voice fire on a locked phone can
+             proceed; the sequence re-locks at its end. Started
+             only by our own code. -->
+        <activity android:name=".UnlockActivity" android:exported="false"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- Ground truth: reads the Modes and Routines app's own status
              notifications on-device (the same dump text the server-side
              system already treats as ground truth). -->
+        <!-- v1.20: Muse Launcher Pack local channel. Exported
+             because the pack is a different app; every call is
+             authenticated inside the provider (calling package +
+             signing certificate + pairing token). No query /
+             insert / update / delete surface exists. -->
+        <provider
+            android:name=".LocalChannel"
+            android:authorities="com.jonathancruzate.metamusedeviceassistance.localchannel"
+            android:exported="true" />
+
         <service android:name=".GroundTruthListener"
             android:label="Muse Device Assistance"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
@@ -136,6 +162,18 @@
              hands the plugin (delivery carries this app's identity, so
              the receiver stays non-exported). -->
         <receiver android:name=".BudsResultReceiver" android:exported="false" />
+
+        <!-- v1.13: Muse Wear Installer status listener — receives
+             the watch app's job status messages over the Wearable
+             Data Layer (paths under /muse-wear-installer). -->
+        <service android:name=".WearStatusService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data android:scheme="wear" android:host="*"
+                    android:pathPrefix="/muse-wear-installer" />
+            </intent-filter>
+        </service>
 
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>

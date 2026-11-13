@@ -122,6 +122,46 @@ public class ShellAllowlistTest {
     expect(bLock.allowed && "buds_lock".equals(bLock.op) && "on".equals(bLock.arg), "buds_touch_lock on op+arg");
     expect(!ShellAllowlist.checkNative("buds_touch_lock", List.of("yes")).allowed, "buds_touch_lock yes refused");
 
+    // ---- v1.13: wear_install_face (dedicated validator) ----
+    // Its slots are typed values (label / https URL / sha256), never
+    // shell text, so the URL legitimately carries characters the
+    // shared hygiene() bans for shell args ('?', '&', '=').
+    expect(ShellAllowlist.isNativeTemplate("wear_install_face"), "wear_install_face is native template");
+    String wSha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    ShellAllowlist.NativeGate wOk = ShellAllowlist.checkNative("wear_install_face",
+            List.of("swiss-army-v6.2", "https://muse.example.com/faces/swiss.apk?sig=abc&x=1", wSha));
+    expect(wOk.allowed && "wear_install".equals(wOk.op)
+            && wOk.args != null && wOk.args.length == 3
+            && "swiss-army-v6.2".equals(wOk.args[0])
+            && wSha.equals(wOk.args[2]), "wear_install_face valid job allowed (op+args)");
+    expect(!ShellAllowlist.checkNative("wear_install_face",
+            List.of("label", "https://h.example/a.apk", "xyz")).allowed,
+            "wear_install_face bad sha refused");
+    expect(!ShellAllowlist.checkNative("wear_install_face",
+            List.of("label", "https://h.example/a.apk", wSha.toUpperCase())).allowed,
+            "wear_install_face uppercase sha refused");
+    expect(!ShellAllowlist.checkNative("wear_install_face",
+            List.of("label", "http://h.example/a.apk", wSha)).allowed,
+            "wear_install_face http refused");
+    expect(!ShellAllowlist.checkNative("wear_install_face",
+            List.of("Swiss Army", "https://h.example/a.apk", wSha)).allowed,
+            "wear_install_face label with space refused");
+    expect(!ShellAllowlist.checkNative("wear_install_face",
+            List.of("label", "https://h.example/a.apk")).allowed,
+            "wear_install_face 2 args refused");
+    expect(!ShellAllowlist.checkNative("wear_install_face",
+            List.of("label", "https://h.example/a.apk", wSha, "extra")).allowed,
+            "wear_install_face 4 args refused");
+    expect(!ShellAllowlist.checkNative("wear_install_face",
+            List.of("label", "https://user@h.example/a.apk", wSha)).allowed,
+            "wear_install_face userinfo refused");
+    expect(!ShellAllowlist.checkNative("wear_install_face",
+            List.of("label", "https://h.example/a b.apk", wSha)).allowed,
+            "wear_install_face url with space refused");
+    expect(!ShellAllowlist.checkNative("wear_install_face",
+            List.of("label", "https://h.example/a.apk\";reboot", wSha)).allowed,
+            "wear_install_face url injection refused");
+
     System.out.println(fails==0?"ALL_PASS":"FAILURES:"+fails);
   }
 }

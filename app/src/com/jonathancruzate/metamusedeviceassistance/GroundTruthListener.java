@@ -73,6 +73,24 @@ public class GroundTruthListener extends NotificationListenerService {
     private void forwardPush(StatusBarNotification sbn, String event) {
         if (sbn == null) return;
         if (!PushChannels.isOn(this, PushChannels.NOTIFICATIONS)) return;
+        // v1.11 loop fix at the source (Jonathan's ruling, 2026-11-10):
+        // IGNORE always-running notifications entirely. This app's own
+        // foreground-service notification is in that class, and it was
+        // the loop source: every push updated it, the listener re-fired,
+        // and the re-push burned the Worker's KV write cap two days
+        // running (2026-11-09/10). Two guards, both silent (logging a
+        // skip per item would itself be noise at shade rates):
+        //  1. hard self-package exclusion — our own notifications are
+        //     never channel content, whatever their flags;
+        //  2. the always-running class — FLAG_ONGOING_EVENT or
+        //     FLAG_FOREGROUND_SERVICE set — from ANY package: persistent
+        //     notifications are state, not events, and re-post on every
+        //     internal update of their owning app.
+        String pkg = sbn.getPackageName();
+        if (pkg == null || pkg.equals(getPackageName())) return;
+        Notification guard = sbn.getNotification();
+        if (guard != null && (guard.flags & (Notification.FLAG_ONGOING_EVENT
+                | Notification.FLAG_FOREGROUND_SERVICE)) != 0) return;
         try {
             Notification n = sbn.getNotification();
             String title = "", text = "", big = "";
@@ -154,6 +172,10 @@ public class GroundTruthListener extends NotificationListenerService {
                     + " running=\"" + r.running + "\" fields=" + r.fields.size()
                     + (r.mode.equals(prevMode) ? "" : " (changed from " + prevMode + ")"));
             BridgeService.requestCycle(this, "ground-truth");
+            if (!r.mode.equals(prevMode)) {
+                // v1.20: poke the Muse Launcher Pack (Section 7.3).
+                ContextBroadcasts.sendModeChanged(this, r.mode);
+            }
         } else {
             Store.put(this, Store.K_GT_PARSE_OK, false);
             // LOUD by design: a format change must never pass silently.

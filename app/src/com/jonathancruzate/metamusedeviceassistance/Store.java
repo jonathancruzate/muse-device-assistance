@@ -17,6 +17,17 @@ public final class Store {
     public static final String K_SECRET = "secret";           // mode-state poll secret, entered on device
     public static final String K_SERVICE_ON = "service_on";
 
+    // Transport migration (v1.9) — the Worker can hand the app a new
+    // base URL + secret (the local relay) inside a mode-state response
+    // (WorkerClient.handleTransportDirective). The previous pair is
+    // kept here so BridgeService's probation fallback can revert if
+    // the new base proves unreachable. Secrets live only in these
+    // prefs — never in the APK, never in the log.
+    public static final String K_BASE_URL_PREV = "base_url_prev";
+    public static final String K_SECRET_PREV = "secret_prev";
+    public static final String K_TRANSPORT_SWITCHED_AT = "transport_switched_at";         // epoch ms of the switch
+    public static final String K_TRANSPORT_PROBATION_UNTIL = "transport_probation_until"; // epoch ms probation ends
+
     // Ground truth (from GroundTruthListener)
     public static final String K_GT_MODE = "gt_mode";         // Samsung mode name, e.g. "Home", "Sleep", "None"
     public static final String K_GT_RUNNING = "gt_running";   // running routines list text
@@ -88,6 +99,22 @@ public final class Store {
     public static final String K_SHELL_LAST_OK = "shell_last_ok";
     public static final String K_SHELL_LAST_MS = "shell_last_ms";
     public static final String K_SHELL_LAST_AT = "shell_last_at";
+    // v1.20 local channel (Muse Launcher Pack): pairing token +
+    // pending claim window + execution bookkeeping. The token value
+    // itself is never logged and never leaves this app except to
+    // the cert-verified pack at claim time.
+    public static final String K_LC_TOKEN = "lc_token";
+    public static final String K_LC_PENDING_TOKEN = "lc_pending_token";
+    public static final String K_LC_PENDING_UNTIL = "lc_pending_until";
+    public static final String K_LC_PAIRED_AT = "lc_paired_at";
+    public static final String K_LC_LAST_TEMPLATE = "lc_last_template";
+    public static final String K_LC_LAST_OK = "lc_last_ok";
+    public static final String K_LC_LAST_AT = "lc_last_at";
+    public static final String K_LC_LAST_MS = "lc_last_ms";
+    public static final String K_LC_COUNT = "lc_count";
+    public static final String K_LC_REFUSED = "lc_refused";
+    public static final String K_LC_WINDOW_START = "lc_window_start";
+    public static final String K_LC_WINDOW_COUNT = "lc_window_count";
 
     // v1.5 extension pack — native (on-device) commands.
     public static final String K_TORCH_ON = "torch_on";       // last torch state from the CameraManager callback
@@ -98,6 +125,15 @@ public final class Store {
     // does not exist.
     public static final String K_VOICE_ENABLED = "voice_enabled"; // module switch (default false)
     public static final String K_VOICE_ACTIVE = "voice_active";   // persisted toggle: voice session believed on
+
+    // Muse Wear Installer routing (v1.13) — last wear_install_face
+    // job's state, mirrored by WearInstallRouter / WearStatusService
+    // and carried in the report's wear_install object.
+    public static final String K_WEAR_JOB_ID = "wear_job_id";
+    public static final String K_WEAR_LABEL = "wear_label";
+    public static final String K_WEAR_STAGE = "wear_stage";
+    public static final String K_WEAR_DETAIL = "wear_detail";
+    public static final String K_WEAR_AT = "wear_at";
 
     // Push channels (v1.6) — local push replacement, design
     // docs/local-push-replacement-v1.6-design-2026-11-09.md §4.
@@ -110,11 +146,10 @@ public final class Store {
     public static final String K_PUSH_MESSAGES = "push_messages";           // default false
     public static final String K_PUSH_DIALER = "push_dialer";               // default false
     public static final String K_PUSH_CALL_LOG = "push_call_log";           // default false
-    public static final String K_PUSH_HEALTH = "push_health";               // default false
     public static final String K_PUSH_BATTERY = "push_battery";             // default false
     public static final String K_PUSH_MODE_RECONCILE = "push_mode_reconcile"; // default true
 
-    // Per-channel bookkeeping: cursor (last id/ts/HC token the channel
+    // Per-channel bookkeeping: cursor (last id/ts the channel
     // has consumed; advances only on a 2xx push — see PushClient),
     // last successful push time, and last error string.
     public static final String K_PUSH_NOTIFICATIONS_CURSOR = "push_notifications_cursor";
@@ -135,9 +170,6 @@ public final class Store {
     public static final String K_PUSH_CALL_LOG_CURSOR = "push_call_log_cursor";
     public static final String K_PUSH_CALL_LOG_LAST_PUSH = "push_call_log_last_push";
     public static final String K_PUSH_CALL_LOG_LAST_ERROR = "push_call_log_last_error";
-    public static final String K_PUSH_HEALTH_CURSOR = "push_health_cursor";
-    public static final String K_PUSH_HEALTH_LAST_PUSH = "push_health_last_push";
-    public static final String K_PUSH_HEALTH_LAST_ERROR = "push_health_last_error";
     public static final String K_PUSH_BATTERY_CURSOR = "push_battery_cursor";
     public static final String K_PUSH_BATTERY_LAST_PUSH = "push_battery_last_push";
     public static final String K_PUSH_BATTERY_LAST_ERROR = "push_battery_last_error";
@@ -158,10 +190,8 @@ public final class Store {
     public static final String K_PUSH_MESSAGES_SMS_ID = "push_messages_sms_id";
     public static final String K_PUSH_MESSAGES_MMS_ID = "push_messages_mms_id";
     public static final String K_PUSH_CALL_LOG_ID = "push_call_log_id";
-    // Health Connect (v1.7): change-log token (string) + last-check
-    // throttle timestamp. Token advances only on a 2xx push.
-    public static final String K_PUSH_HEALTH_TOKEN = "push_health_token";
-    public static final String K_PUSH_HEALTH_LAST_CHECK = "push_health_last_check";
+    // (v1.12: the Health Connect channel's Store keys were removed
+    // with the channel — see PushChannels.)
 
     // Tailscale guardian (v1.3.1 detection; v1.3.2 reviver)
     public static final String K_TS_DOWN_SINCE = "ts_down_since";   // epoch ms tailnet first seen down (0 = up)

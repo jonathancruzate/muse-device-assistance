@@ -588,3 +588,40 @@ actuation is untouched and still defaults DISARMED.
   `phone-notify-drain` lane retires with it. Every other observer
   channel stays OFF until Jonathan flips it. Phase 2 DISARMED.
   Full record: `docs/v1.7-push-observers-2026-11-09.md`.
+
+## v1.20.0 — Muse Launcher Pack local channel (2026-11-12)
+
+- **LocalChannel (ContentProvider, call()-only):** the Muse
+  Launcher Pack's on-device command channel (Launcher Pack
+  design Section 7.2, as amended at execution on the swarm
+  Skeptic's dissent: a broadcast cannot authenticate its
+  sender, call() can). Every call verifies the calling
+  package is the Muse Widget app AND its signing certificate
+  SHA-256 matches that app's known fingerprint; execute()
+  additionally requires the pairing token (generated on this
+  phone when Jonathan opens the pairing window in
+  MainActivity, claimable once inside five minutes by the
+  cert-verified pack, revocable from either app, never
+  logged, never in a build artifact).
+- Execution reuses `ShellBridge.executeGated` (extracted from
+  the Worker channel's tick): identical ShellAllowlist gates
+  and dispatch, no new verbs. wear_install is refused
+  locally. Shell templates keep the Worker channel's rule:
+  loopback bridge paired + switched on. Rate limit 30 calls
+  per minute; refusals counted and logged. The synchronous
+  return Bundle is the acknowledgement the pack renders from.
+- **ContextBroadcasts:** package-scoped CONTEXT_MODE
+  broadcast to the pack when ground truth observes a mode
+  change (pokes only; the pack treats broadcasts as
+  re-render hints, never commands).
+- Report gains `local_channel` (paired / counts / last,
+  never the token). Phase 2 actuation state untouched.
+- Build record: versionCode 31 / 1.20.0; all dex guards
+  pass; ShellAllowlist gate tests ALL_PASS; signer cert
+  SHA-256 `4dcb45fa…` unchanged. APK
+  `app/Muse-Device-Assistance-1.20.0.apk`, 6,109,349 bytes,
+  SHA-256
+  `a935fdf62c02afe98e16cf2eb71627016ac0b562d1b0d271c61a28c4af7be9c5`.
+  Install attempted 2026-11-12 04:41 EST; phone unreachable
+  (wireless debugging endpoint refused), so this build is
+  staged, not installed.

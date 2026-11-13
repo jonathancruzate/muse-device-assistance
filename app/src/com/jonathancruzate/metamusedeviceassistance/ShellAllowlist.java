@@ -63,6 +63,11 @@ public final class ShellAllowlist {
     private static final Pattern EQ_PRESET = Pattern.compile(
             "^(off|bass_boost|soft|dynamic|clear|treble_boost)$");
     private static final Pattern ON_OFF = Pattern.compile("^(on|off)$");
+    // v1.13 Muse Wear Installer routing validators (checkWearInstall).
+    private static final Pattern WEAR_LABEL = Pattern.compile(
+            "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
+    private static final Pattern SHA256_HEX = Pattern.compile(
+            "^[0-9a-f]{64}$");
     // STREAM_MUSIC range on this device, proven 2026-11-08 via
     // `cmd media_session volume --stream 3 --get` ("range [0..15]").
     private static final int MEDIA_VOL_MAX = 15;
@@ -123,6 +128,35 @@ public final class ShellAllowlist {
             "buds_ambient_volume", // args: 1..5
             "buds_eq",             // args: off|bass_boost|soft|dynamic|clear|treble_boost
             "buds_touch_lock",     // args: on|off
+            // ---- v1.13 Muse Wear Installer routing (2026-11-11) ----
+            // args: <label> <https-url> <sha256> -> WearInstallRouter:
+            // the phone downloads the watch-face APK, verifies its
+            // sha256, relays it to Muse Wear Installer on the watch
+            // over the Data Layer, and awaits the on-watch verdict.
+            // Gated by the dedicated checkWearInstall() validator —
+            // its args are typed values, never shell text.
+            "wear_install_face",
+            // ---- v1.14 voice bridge injection ----
+            // args: <word> <word> ... -> VoiceBridge: the words are
+            // joined with single spaces and typed into the Muse
+            // app's main-conversation composer by the accessibility
+            // service, then sent AS Jonathan (a voice session only
+            // hears the conversation's own user turns). Gated by
+            // the dedicated checkVoiceBridge() validator — free
+            // text can never satisfy shared hygiene(), and it never
+            // becomes shell text.
+            "voice_bridge",
+            // ---- v1.15 combined voice call ----
+            // args: NONE. One mechanical fire: start voice mode,
+            // return to the previous app (PiP), then type the FIXED
+            // marker text (VoiceBridge.VOICE_CONTEXT_MARKER) as
+            // Jonathan. No semantics ride this command — the firing
+            // Muse writes ~/workspace/voice_context.md first, and
+            // the session-side Muse reads it before speaking
+            // (Jonathan's design, 2026-11-11: the firing is fast
+            // and mechanical; the context file is the semantic
+            // portion). Executed by VoiceBridge.executeCombined.
+            "voice_call",
     };
 
     public static boolean isNativeTemplate(String template) {
@@ -139,16 +173,26 @@ public final class ShellAllowlist {
         /** Validated single arg for routed ops (plugin verbs); null
          *  for the fixed ops that encode everything in the op name. */
         public final String arg;
+        /** Validated multi-arg payload for routed ops that need more
+         *  than one slot (v1.13: wear_install_face carries label +
+         *  url + sha256). Null for every op that predates it. */
+        public final String[] args;
 
         NativeGate(boolean allowed, String op, String refusal) {
-            this(allowed, op, refusal, null);
+            this(allowed, op, refusal, null, null);
         }
 
         NativeGate(boolean allowed, String op, String refusal, String arg) {
+            this(allowed, op, refusal, arg, null);
+        }
+
+        NativeGate(boolean allowed, String op, String refusal, String arg,
+                   String[] args) {
             this.allowed = allowed;
             this.op = op;
             this.refusal = refusal;
             this.arg = arg;
+            this.args = args;
         }
     }
 
@@ -164,6 +208,31 @@ public final class ShellAllowlist {
     public static NativeGate checkNative(String template, List<String> args) {
         if (template == null) return nRefuse("no template");
         if (args == null) args = new ArrayList<>();
+        // v1.13: wear_install_face is gated by its OWN validator,
+        // before shared hygiene(). Its slots carry an HTTPS URL and a
+        // sha256 — a URL can never satisfy hygiene()'s charset (which
+        // bans '?', '&', '=' and caps args at 256 chars). Those bans
+        // exist because shell argv is joined with single spaces; these
+        // args NEVER become shell text — WearInstallRouter consumes
+        // them as typed values (an HTTPS fetch and a hash compare).
+        // checkWearInstall() re-implements hygiene's protections per
+        // slot: strict label charset, https-only URL with a host and
+        // no whitespace/quotes/control characters, exact sha256 shape.
+        if ("wear_install_face".equals(template)) {
+            return checkWearInstall(args);
+        }
+        // v1.14: voice_bridge is gated by its OWN validator, before
+        // shared hygiene(), for the same reason as wear: its slots
+        // carry free text (spaces, punctuation) that hygiene()'s
+        // charset bans outright. The text NEVER becomes shell —
+        // VoiceBridge hands it to the accessibility service, which
+        // types it into the Muse app's composer as a typed value.
+        // checkVoiceBridge() re-implements the protections that
+        // matter here: non-empty, per-arg and total length caps,
+        // no control characters, no quote/backtick characters.
+        if ("voice_bridge".equals(template)) {
+            return checkVoiceBridge(args);
+        }
         String bad = hygiene(args);
         if (bad != null) return nRefuse(bad);
         switch (template) {
@@ -181,6 +250,9 @@ public final class ShellAllowlist {
                 if ("on".equals(args.get(0))) return nAllow("voice_on");
                 if ("off".equals(args.get(0))) return nAllow("voice_off");
                 return nRefuse("needs <toggle|on|off>");
+            case "voice_call":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return nAllow("voice_call");
             // ---- v1.5.1 Galaxy Buds plugin routing ----
             case "buds_status":
                 if (!args.isEmpty()) return nRefuse("takes no args");
@@ -221,6 +293,84 @@ public final class ShellAllowlist {
             default:
                 return nRefuse("unknown native template");
         }
+    }
+
+    /**
+     * The voice_bridge gate (v1.14): the command's args are the
+     * words of one bridge message, joined here with single spaces
+     * into the single typed value VoiceBridge consumes. Rules:
+     * at least one arg; each arg 1..256 chars; joined total at
+     * most 2000 chars; no control characters and no quote /
+     * backtick characters in any arg (the text is logged and
+     * rendered, never parsed — this is belt-and-braces). The
+     * joined text rides NativeGate.arg.
+     */
+    private static NativeGate checkVoiceBridge(List<String> args) {
+        if (args.isEmpty()) return nRefuse("needs <text...>");
+        StringBuilder sb = new StringBuilder();
+        for (String a : args) {
+            if (a == null || a.isEmpty() || a.length() > 256) {
+                return nRefuse("bad text arg");
+            }
+            for (int i = 0; i < a.length(); i++) {
+                char c = a.charAt(i);
+                if (c < 0x20 || c == 0x7F || c == '"' || c == '\''
+                        || c == '`' || c == '\\') {
+                    return nRefuse("bad text character");
+                }
+            }
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(a);
+            if (sb.length() > 2000) return nRefuse("text too long");
+        }
+        return new NativeGate(true, "voice_bridge", null, sb.toString());
+    }
+
+    /**
+     * The wear_install_face gate (v1.13): three typed slots —
+     * label, https URL, sha256 — validated individually. See the
+     * checkNative() call-site comment for why this template cannot
+     * ride the shared hygiene() pass. The URL rules: https scheme
+     * only, must parse with a non-empty host, no userinfo, no
+     * whitespace / control / quote / backtick / angle characters,
+     * 10..2048 chars. The label is a file-safe token (it is shown on
+     * the watch and used in log lines only). The sha256 must be the
+     * exact lowercase-hex digest the phone re-verifies after download
+     * and the watch re-verifies after transfer.
+     */
+    private static NativeGate checkWearInstall(List<String> args) {
+        if (args.size() != 3) return nRefuse("needs <label> <url> <sha256>");
+        String label = args.get(0);
+        String url = args.get(1);
+        String sha = args.get(2);
+        if (!ok(WEAR_LABEL, label)) return nRefuse("bad label");
+        if (!ok(SHA256_HEX, sha)) return nRefuse("bad sha256");
+        if (url == null || url.length() < 10 || url.length() > 2048) {
+            return nRefuse("bad url length");
+        }
+        for (int i = 0; i < url.length(); i++) {
+            char c = url.charAt(i);
+            if (Character.isWhitespace(c) || c < 0x20 || c == 0x7F
+                    || c == '"' || c == '\'' || c == '`' || c == '\\'
+                    || c == '<' || c == '>' || c == '#') {
+                return nRefuse("bad url character");
+            }
+        }
+        java.net.URI u;
+        try {
+            u = new java.net.URI(url);
+        } catch (Exception e) {
+            return nRefuse("unparseable url");
+        }
+        if (!"https".equalsIgnoreCase(u.getScheme())) {
+            return nRefuse("url must be https");
+        }
+        if (u.getHost() == null || u.getHost().isEmpty()) {
+            return nRefuse("url has no host");
+        }
+        if (u.getUserInfo() != null) return nRefuse("url userinfo refused");
+        return new NativeGate(true, "wear_install", null, null,
+                new String[]{label, url, sha});
     }
 
     /**

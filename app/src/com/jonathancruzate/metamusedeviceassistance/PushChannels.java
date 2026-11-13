@@ -70,10 +70,11 @@ public final class PushChannels {
             "call_log", "Call Log", "phone-calllog",
             Store.K_PUSH_CALL_LOG, Store.K_PUSH_CALL_LOG_CURSOR,
             Store.K_PUSH_CALL_LOG_LAST_PUSH, Store.K_PUSH_CALL_LOG_LAST_ERROR, false);
-    public static final Channel HEALTH = new Channel(
-            "health", "Health Connect", "phone-health",
-            Store.K_PUSH_HEALTH, Store.K_PUSH_HEALTH_CURSOR,
-            Store.K_PUSH_HEALTH_LAST_PUSH, Store.K_PUSH_HEALTH_LAST_ERROR, false);
+    // v1.12: the Health Connect channel is REMOVED (Jonathan's order,
+    // 2026-11-10 — agreed 2026-11-09: redundant; the Muse app's Health
+    // Connect permission + the Health Connect connector own health
+    // data). Channel, observer (HealthPush), toggle, and the manifest
+    // HC permission declarations are all gone, not just defaulted off.
     public static final Channel BATTERY = new Channel(
             "battery", "Low Battery (20% crossing)", "phone-battery",
             Store.K_PUSH_BATTERY, Store.K_PUSH_BATTERY_CURSOR,
@@ -85,7 +86,7 @@ public final class PushChannels {
 
     public static final Channel[] ALL = {
             NOTIFICATIONS, CALENDAR, CONTACTS, MESSAGES, DIALER,
-            CALL_LOG, HEALTH, BATTERY, MODE_RECONCILE,
+            CALL_LOG, BATTERY, MODE_RECONCILE,
     };
 
     public static Channel byId(String id) {

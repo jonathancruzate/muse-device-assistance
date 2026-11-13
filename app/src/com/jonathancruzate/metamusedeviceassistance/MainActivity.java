@@ -42,6 +42,7 @@ public class MainActivity extends Activity {
     private EditText pairAddrField;
     private EditText pairCodeField;
     private TextView actView;
+    private TextView lcView;
     private android.widget.CheckBox armCheck;
     private TextView probeView;
     private TextView logView;
@@ -314,8 +315,10 @@ public class MainActivity extends Activity {
                 + "not registered, not read, not pushed. All default OFF "
                 + "except Mode reconcile (the bridge's existing loop). "
                 + "Live since v1.7: Notifications, Low Battery, Calendar, "
-                + "Contacts, Messages, Phone dialer, Call Log, and Health "
-                + "Connect (change-log). On TV every channel is gated off.");
+                + "Contacts, Messages, Phone dialer, and Call Log. "
+                + "(The Health Connect channel was removed in v1.12 — "
+                + "health data flows through the Health Connect "
+                + "connector.) On TV every channel is gated off.");
         root.addView(pushHint);
 
         pushView = new TextView(this);
@@ -336,6 +339,33 @@ public class MainActivity extends Activity {
             pushChecks[i] = cb;
             root.addView(cb);
         }
+
+        TextView lcLabel = new TextView(this);
+        lcLabel.setText("\nMuse Launcher Pack — local channel");
+        lcLabel.setTextSize(16);
+        root.addView(lcLabel);
+
+        TextView lcHint = new TextView(this);
+        lcHint.setText("The Muse Launcher Pack widgets can run the same "
+                + "allowlisted commands as the Worker channel, locally: "
+                + "opening the pairing window below mints a one-time token "
+                + "the pack claims (its app signature is verified first). "
+                + "Revoke here or in the pack's setup at any time.");
+        root.addView(lcHint);
+
+        lcView = new TextView(this);
+        lcView.setText(LocalChannel.statusText(this));
+        root.addView(lcView);
+
+        root.addView(button("Open pairing window (5 min)", v -> {
+            LocalChannel.openPairingWindow(this);
+            lcView.setText(LocalChannel.statusText(this));
+        }));
+
+        root.addView(button("Revoke Launcher Pack pairing", v -> {
+            LocalChannel.revokePairing(this);
+            lcView.setText(LocalChannel.statusText(this));
+        }));
 
         TextView actLabel = new TextView(this);
         actLabel.setText("\nPhase 2 actuation — all house modes, OFF by default");
@@ -517,8 +547,7 @@ public class MainActivity extends Activity {
      * Notifications is already granted (status only); Calendar /
      * Contacts / Messages / Dialer / Call Log request their runtime
      * permission here (their observers are v1.7 — toggle + Store + log
-     * + permission is the whole v1.6 surface for them); Health Connect
-     * grants live in the Health Connect app, stubbed with a toast.
+     * + permission is the whole v1.6 surface for them).
      */
     private void onPushToggled(PushChannels.Channel ch, boolean checked) {
         if (DeviceProfile.isTv(this)) {
@@ -560,10 +589,6 @@ public class MainActivity extends Activity {
                     break;
                 case "call_log":
                     requestPermissions(new String[]{android.Manifest.permission.READ_CALL_LOG}, 75);
-                    break;
-                case "health":
-                    toast("Health Connect: per-type grants are in the Health Connect app");
-                    BridgeLog.log(this, "PUSH", "health channel ON: Health Connect grants are user-managed in the HC app (v1.7 change-log observer)");
                     break;
                 default:
                     // battery + mode_reconcile need no permission.
