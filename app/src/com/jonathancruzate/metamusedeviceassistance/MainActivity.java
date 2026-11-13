@@ -34,6 +34,7 @@ public class MainActivity extends Activity {
     private android.widget.CheckBox shellCheck;
     private boolean syncingShellCheck;
     private TextView extView;
+    private TextView filesView;
     private android.widget.CheckBox voiceCheck;
     private boolean syncingVoiceCheck;
     private TextView pushView;
@@ -41,9 +42,7 @@ public class MainActivity extends Activity {
     private boolean syncingPushCheck;
     private EditText pairAddrField;
     private EditText pairCodeField;
-    private TextView actView;
     private TextView lcView;
-    private android.widget.CheckBox armCheck;
     private TextView probeView;
     private TextView logView;
     private EditText baseUrlField;
@@ -71,8 +70,8 @@ public class MainActivity extends Activity {
         }
         TextView sub = new TextView(this);
         sub.setText("Control plane that complements MacroDroid: ground truth, "
-                + "verified acks, drift plans. Shadow by default — Phase 2 "
-                + "actuation (night only) stays OFF unless armed below.");
+                + "verified acks, drift plans. Shadow by design — the bridge "
+                + "observes and reports only; it never fires routines.");
         root.addView(sub);
 
         stateView = new TextView(this);
@@ -234,6 +233,59 @@ public class MainActivity extends Activity {
         });
         root.addView(shellCheck);
 
+        TextView filesLabel = new TextView(this);
+        filesLabel.setText("\nPhone files (v1.24) — Downloads & public folders");
+        filesLabel.setTextSize(16);
+        root.addView(filesLabel);
+
+        TextView filesHint = new TextView(this);
+        filesHint.setText("Lets Muse inventory and organize this phone's "
+                + "public folders (Download, Documents, DCIM, Pictures, "
+                + "Movies, Music): list, hash, move between folders, "
+                + "file loose downloads by type, and trash — trash is a "
+                + "MOVE to .muse-trash, never a permanent delete. The "
+                + "one-time switch is Android's All Files Access grant "
+                + "below; without it every file command refuses.");
+        root.addView(filesHint);
+
+        filesView = new TextView(this);
+        filesView.setTextIsSelectable(true);
+        root.addView(filesView);
+
+        root.addView(button("Grant All Files Access", v -> {
+            try {
+                Intent i = new Intent(
+                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:" + getPackageName()));
+                startActivity(i);
+            } catch (Exception e) {
+                try {
+                    startActivity(new Intent(
+                            Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                } catch (Exception e2) {
+                    toast("Could not open All Files Access settings");
+                }
+            }
+        }));
+
+        root.addView(button("Inventory Downloads now", v -> {
+            new Thread(() -> {
+                LoopbackAdb.Result r = FileRouter.execute(this, "files_list",
+                        new String[]{"download", "0"});
+                runOnUiThread(() -> {
+                    if (r.ok) {
+                        String first = r.stdoutTail == null ? ""
+                                : r.stdoutTail.split("\n")[0];
+                        toast("Downloads: " + first);
+                    } else {
+                        toast("Inventory refused: " + r.error);
+                    }
+                    refresh();
+                });
+            }).start();
+            toast("Reading Downloads…");
+        }));
+
         TextView extLabel = new TextView(this);
         extLabel.setText("\nExtension pack (v1.5) — device controls");
         extLabel.setTextSize(16);
@@ -367,49 +419,6 @@ public class MainActivity extends Activity {
             lcView.setText(LocalChannel.statusText(this));
         }));
 
-        TextView actLabel = new TextView(this);
-        actLabel.setText("\nPhase 2 actuation — all house modes, OFF by default");
-        actLabel.setTextSize(16);
-        root.addView(actLabel);
-
-        TextView actHint = new TextView(this);
-        actHint.setText("Linking opens Samsung's routine picker — pick the matching "
-                + "Switch routine once; its launch shortcut is stored on this phone "
-                + "only. Arming lets the bridge fire the linked routine itself when "
-                + "the Worker asks for any house mode and a fresh dump shows drift "
-                + "(one fire per step per request; the Away latch is cleared first, "
-                + "never fired over). Disarmed, the bridge only records what it "
-                + "would fire — that shadow record is in every report.");
-        root.addView(actHint);
-
-        actView = new TextView(this);
-        actView.setTextIsSelectable(true);
-        root.addView(actView);
-
-        armCheck = new android.widget.CheckBox(this);
-        armCheck.setText("ARM Phase 2: fire linked routines on drift (Home / Away / Night / Morning)");
-        armCheck.setChecked(Store.getBool(this, Store.K_ACT_ARMED, false));
-        armCheck.setOnCheckedChangeListener((v, checked) -> {
-            Store.put(this, Store.K_ACT_ARMED, checked);
-            BridgeLog.log(this, "ACT", "Phase 2 actuation " + (checked ? "ARMED" : "DISARMED") + " from UI");
-            refresh();
-        });
-        root.addView(armCheck);
-
-        root.addView(button("Link routine: Night (Switch Sleep mode)", v -> startLink("night", 61)));
-        root.addView(button("Link routine: Home", v -> startLink("home", 62)));
-        root.addView(button("Link routine: Morning", v -> startLink("morning", 63)));
-        root.addView(button("Link routine: Away latch", v -> startLink("away", 64)));
-        root.addView(button("Test fire: Night routine", v -> {
-            if (!RoutineFirer.isLinked(this, "night")) {
-                toast("Night routine not linked yet");
-                return;
-            }
-            boolean ok = RoutineFirer.fire(this, "night");
-            toast(ok ? "Fired Night routine" : "Fire failed — see log");
-            refreshSoon();
-        }));
-
         TextView settingsLabel = new TextView(this);
         settingsLabel.setText("\nWorker settings (secret lives only on this phone)");
         settingsLabel.setTextSize(16);
@@ -485,57 +494,6 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        refresh();
-    }
-
-    private void startLink(String houseMode, int requestCode) {
-        if (!RoutineFirer.linkFlowAvailable(this)) {
-            BridgeLog.log(this, "LINK", "CREATE_SHORTCUT picker NOT resolvable on this "
-                    + "build — link flow unavailable for " + houseMode);
-            toast("Samsung's shortcut picker isn't available on this build — see log");
-            return;
-        }
-        try {
-            startActivityForResult(RoutineFirer.buildLinkIntent(), requestCode);
-        } catch (Exception e) {
-            BridgeLog.log(this, "LINK", "startActivityForResult failed for " + houseMode
-                    + ": " + e.getClass().getSimpleName() + " " + e.getMessage());
-            toast("Could not open the routine picker — see log");
-        }
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        String mode;
-        switch (requestCode) {
-            case 61: mode = "night"; break;
-            case 62: mode = "home"; break;
-            case 63: mode = "morning"; break;
-            case 64: mode = "away"; break;
-            default: return;
-        }
-        if (resultCode != RESULT_OK || data == null) {
-            BridgeLog.log(this, "LINK", "link cancelled for " + mode);
-            refresh();
-            return;
-        }
-        Intent shortcut = null;
-        try {
-            shortcut = data.getParcelableExtra(Intent.EXTRA_SHORTCUT_INTENT);
-        } catch (Exception ignored) {}
-        String name = data.getStringExtra(Intent.EXTRA_SHORTCUT_NAME);
-        if (shortcut == null) {
-            BridgeLog.log(this, "LINK", "picker returned NO shortcut intent for " + mode
-                    + " — the CREATE_SHORTCUT contract is not honored on this build");
-            toast("Picker returned no shortcut — see log");
-            refresh();
-            return;
-        }
-        Store.put(this, RoutineFirer.linkKey(mode), shortcut.toUri(Intent.URI_INTENT_SCHEME));
-        if (name != null) Store.put(this, RoutineFirer.linkNameKey(mode), name);
-        BridgeLog.log(this, "LINK", "linked " + mode + " -> " + name);
-        toast("Linked " + mode + (name != null ? ": " + name : ""));
         refresh();
     }
 
@@ -691,6 +649,10 @@ public class MainActivity extends Activity {
             }
         }
 
+        if (filesView != null) {
+            filesView.setText(FileRouter.uiState(this));
+        }
+
         if (extView != null) {
             StringBuilder ev = new StringBuilder();
             long torchAt = Store.getLong(this, Store.K_TORCH_AT, 0);
@@ -739,25 +701,6 @@ public class MainActivity extends Activity {
                 }
                 syncingPushCheck = false;
             }
-        }
-
-        if (actView != null) {
-            StringBuilder av = new StringBuilder();
-            av.append("Actuation armed: ")
-              .append(Store.getBool(this, Store.K_ACT_ARMED, false)).append('\n');
-            for (String m : new String[]{"night", "home", "morning", "away"}) {
-                av.append("Linked ").append(m).append(": ");
-                if (RoutineFirer.isLinked(this, m)) {
-                    String n = RoutineFirer.linkedName(this, m);
-                    av.append(n.isEmpty() ? "yes" : n);
-                } else {
-                    av.append("not linked");
-                }
-                av.append('\n');
-            }
-            av.append("Last fired seq: ")
-              .append(Store.getLong(this, Store.K_ACT_FIRED_SEQ, -1)).append('\n');
-            actView.setText(av.toString());
         }
 
         List<String> tail = BridgeLog.tail(this, 40);

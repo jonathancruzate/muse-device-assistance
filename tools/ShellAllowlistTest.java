@@ -204,6 +204,65 @@ public class ShellAllowlistTest {
     expect(ShellAllowlist.isNativeTemplate("self_update"),
             "self_update is a native template");
 
+    // ---- v1.24: files_* gates (dedicated validator, FilePlan tables) ----
+    expect(ShellAllowlist.isNativeTemplate("files_list"), "files_list is native template");
+    expect(ShellAllowlist.isNativeTemplate("files_organize"), "files_organize is native template");
+    ShellAllowlist.NativeGate fAcc = ShellAllowlist.checkNative("files_access", List.of());
+    expect(fAcc.allowed && "files_access".equals(fAcc.op), "files_access no args");
+    expect(!ShellAllowlist.checkNative("files_access", List.of("x")).allowed, "files_access arg refused");
+    expect(ShellAllowlist.checkNative("files_summary", List.of()).allowed, "files_summary no args");
+    ShellAllowlist.NativeGate fList = ShellAllowlist.checkNative("files_list", List.of("download"));
+    expect(fList.allowed && fList.args != null && fList.args.length == 2
+            && "download".equals(fList.args[0]) && "".equals(fList.args[1]), "files_list folder only");
+    ShellAllowlist.NativeGate fList2 = ShellAllowlist.checkNative("files_list", List.of("download", "40"));
+    expect(fList2.allowed && "40".equals(fList2.args[1]), "files_list with offset");
+    expect(!ShellAllowlist.checkNative("files_list", List.of("download", "-1")).allowed, "files_list negative offset refused");
+    expect(!ShellAllowlist.checkNative("files_list", List.of("download", "x")).allowed, "files_list bad offset refused");
+    expect(!ShellAllowlist.checkNative("files_list", List.of("/storage/emulated/0/Download")).allowed, "files_list path refused (token only)");
+    expect(!ShellAllowlist.checkNative("files_list", List.of("secrets")).allowed, "files_list bad folder refused");
+    expect(!ShellAllowlist.checkNative("files_list", List.of()).allowed, "files_list no args refused");
+    // Names ride as word args joined with single spaces (typed values).
+    ShellAllowlist.NativeGate fHash = ShellAllowlist.checkNative("files_hash",
+            Arrays.asList("download", "My", "Report", "2026.pdf"));
+    expect(fHash.allowed && fHash.args != null && "My Report 2026.pdf".equals(fHash.args[1]), "files_hash name joined");
+    expect(ShellAllowlist.checkNative("files_hash",
+            List.of("download", "plain.pdf")).allowed, "files_hash one-word name");
+    expect(!ShellAllowlist.checkNative("files_hash",
+            List.of("download", "../secret.txt")).allowed, "files_hash parent ref refused");
+    expect(!ShellAllowlist.checkNative("files_hash",
+            Arrays.asList("download", "a/b.txt")).allowed, "files_hash separator refused");
+    expect(!ShellAllowlist.checkNative("files_hash",
+            List.of("download", ".hidden")).allowed, "files_hash dotfile refused");
+    expect(!ShellAllowlist.checkNative("files_hash",
+            List.of("download")).allowed, "files_hash no name refused");
+    ShellAllowlist.NativeGate fTrash = ShellAllowlist.checkNative("files_trash",
+            Arrays.asList("download", "old", "installer.apk"));
+    expect(fTrash.allowed && "old installer.apk".equals(fTrash.args[1]), "files_trash name joined");
+    ShellAllowlist.NativeGate fMove = ShellAllowlist.checkNative("files_move",
+            Arrays.asList("download", "documents", "My", "File.pdf"));
+    expect(fMove.allowed && fMove.args != null && fMove.args.length == 3
+            && "documents".equals(fMove.args[1]) && "My File.pdf".equals(fMove.args[2]), "files_move slots");
+    expect(!ShellAllowlist.checkNative("files_move",
+            Arrays.asList("download", "download", "x.pdf")).allowed, "files_move same folder refused");
+    expect(!ShellAllowlist.checkNative("files_move",
+            Arrays.asList("download", "trash", "x.pdf")).allowed, "files_move to trash refused (use files_trash)");
+    expect(!ShellAllowlist.checkNative("files_move",
+            Arrays.asList("download", "documents")).allowed, "files_move no name refused");
+    expect(ShellAllowlist.checkNative("files_organize", List.of("download")).allowed, "files_organize download");
+    expect(!ShellAllowlist.checkNative("files_organize", List.of()).allowed, "files_organize no args refused");
+    expect(!ShellAllowlist.checkNative("files_rm", List.of("download", "x.pdf")).allowed, "files_rm unknown refused (no delete template exists)");
+    // FilePlan filing rules, exercised directly.
+    expect("Images".equals(com.jonathancruzate.metamusedeviceassistance.FilePlan.categoryFor("photo.JPG")), "category jpg -> Images");
+    expect("Documents".equals(com.jonathancruzate.metamusedeviceassistance.FilePlan.categoryFor("report.pdf")), "category pdf -> Documents");
+    expect("APKs".equals(com.jonathancruzate.metamusedeviceassistance.FilePlan.categoryFor("app.apk")), "category apk -> APKs");
+    expect(com.jonathancruzate.metamusedeviceassistance.FilePlan.categoryFor("movie.crdownload") == null, "category crdownload -> none");
+    expect(com.jonathancruzate.metamusedeviceassistance.FilePlan.categoryFor("mystery.xyz") == null, "category unknown -> none");
+    expect(com.jonathancruzate.metamusedeviceassistance.FilePlan.categoryFor(".hidden.pdf") == null, "category dotfile -> none");
+    expect(com.jonathancruzate.metamusedeviceassistance.FilePlan.folderOk("download"), "FilePlan download token");
+    expect(!com.jonathancruzate.metamusedeviceassistance.FilePlan.folderOk("android"), "FilePlan android token refused");
+    expect(com.jonathancruzate.metamusedeviceassistance.FilePlan.nameOk("a b.pdf"), "FilePlan name with space ok");
+    expect(!com.jonathancruzate.metamusedeviceassistance.FilePlan.nameOk(".."), "FilePlan dotdot refused");
+
     System.out.println(fails==0?"ALL_PASS":"FAILURES:"+fails);
   }
 }

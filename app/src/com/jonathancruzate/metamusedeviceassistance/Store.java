@@ -55,38 +55,6 @@ public final class Store {
     public static final String K_LAST_REPORT_AT = "last_report_at";
     public static final String K_LAST_REPORT_CODE = "last_report_code";
 
-    // Phase 2 actuation (v1.3) — night mode only, OFF unless armed here.
-    // A routine is fired through the launch-shortcut intent Samsung itself
-    // minted when the routine was linked on-device (CREATE_SHORTCUT flow);
-    // the intent URI lives only in these prefs, never in the APK.
-    public static final String K_ACT_ARMED = "act_armed";           // default false
-    public static final String K_LINK_NIGHT = "link_night";         // intent URI for Switch Sleep
-    public static final String K_LINK_HOME = "link_home";
-    public static final String K_LINK_MORNING = "link_morning";
-    public static final String K_LINK_AWAY = "link_away";
-    public static final String K_LINK_NAME_NIGHT = "link_name_night";
-    public static final String K_LINK_NAME_HOME = "link_name_home";
-    public static final String K_LINK_NAME_MORNING = "link_name_morning";
-    public static final String K_LINK_NAME_AWAY = "link_name_away";
-    public static final String K_ACT_FIRED_SEQ = "act_fired_seq";   // desired seq already fired for
-    public static final String K_ACT_LAST_LOG = "act_last_log";     // throttle for repeated actuation logs
-
-    // Phase 2 expansion (v1.8) — all house modes. The Away-latch clear
-    // is its own once-per-seq fire, sequenced BEFORE the target fire;
-    // its markers mirror the target fire's.
-    public static final String K_ACT_AWAY_CLEAR_SEQ = "act_away_clear_seq";
-    public static final String K_ACT_AWAY_CLEAR_AT = "act_away_clear_at";
-    public static final String K_ACT_AWAY_CLEAR_GT = "act_away_clear_gt"; // gt_at when the clear fired
-    public static final String K_ACT_FIRED_AT = "act_fired_at";           // epoch ms of the last target fire
-    public static final String K_ACT_FIRED_GT = "act_fired_gt";           // gt_at when the last target fired
-    // Shadow-evidence records (v1.8): the latest per-cycle decision,
-    // the last real fire with its verified outcome, and a capped
-    // decision history — JSON strings, carried in every report so
-    // parity with MacroDroid Mode Poll is provable from the outside.
-    public static final String K_ACT_SHADOW = "act_shadow_json";
-    public static final String K_ACT_LAST_FIRE = "act_last_fire_json";
-    public static final String K_ACT_HISTORY = "act_history_json";
-
     // Loopback shell bridge (v1.4) — in-app pairing with the phone's own
     // wireless debugging; allowlisted commands pulled from the Worker.
     // The RSA key + cert live in app-private FILES (LoopbackAdb), never
@@ -146,6 +114,16 @@ public final class Store {
     public static final String K_UPDATE_DETAIL = "update_detail";
     public static final String K_UPDATE_AT = "update_at";
     public static final String K_UPDATE_FROM = "update_from_code";
+
+    // Phone file management (v1.24) — last files_* op's bookkeeping,
+    // mirrored by FileRouter and carried in the report's
+    // shell_bridge.files object. There is NO enable switch key:
+    // the capability gate is the system's All Files Access grant
+    // itself (Environment.isExternalStorageManager), Jonathan's
+    // one-time act in Settings / the in-app Phone files section.
+    public static final String K_FILES_LAST_OP = "files_last_op";
+    public static final String K_FILES_LAST_DETAIL = "files_last_detail";
+    public static final String K_FILES_LAST_AT = "files_last_at";
 
     // Push channels (v1.6) — local push replacement, design
     // docs/local-push-replacement-v1.6-design-2026-11-09.md §4.

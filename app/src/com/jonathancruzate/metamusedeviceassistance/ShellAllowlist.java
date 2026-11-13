@@ -68,6 +68,8 @@ public final class ShellAllowlist {
             "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
     private static final Pattern SHA256_HEX = Pattern.compile(
             "^[0-9a-f]{64}$");
+    // v1.24 phone file management validators (tables live in FilePlan).
+    private static final Pattern FILE_OFFSET = Pattern.compile("^\\d{1,7}$");
     // STREAM_MUSIC range on this device, proven 2026-11-08 via
     // `cmd media_session volume --stream 3 --get` ("range [0..15]").
     private static final int MEDIA_VOL_MAX = 15;
@@ -171,6 +173,19 @@ public final class ShellAllowlist {
             // reasoning as checkWearInstall: typed values, never
             // shell text).
             "self_update",
+            // ---- v1.24 phone file management ----
+            // Folder tokens + direct-child file names are TYPED
+            // values consumed by FileRouter via java.io.File —
+            // never shell text (real download names carry spaces
+            // and punctuation the shared hygiene() bans). Gated
+            // by the dedicated checkFiles() validator.
+            "files_access",    // args: none -> access state + folder presence
+            "files_summary",   // args: none -> per-folder counts/bytes/newest
+            "files_list",      // args: <folder> [offset] -> one page, newest first
+            "files_hash",      // args: <folder> <name...> -> sha256 of one file
+            "files_move",      // args: <folder> <dest-folder> <name...>
+            "files_trash",     // args: <folder> <name...> -> move to .muse-trash
+            "files_organize",  // args: <folder> -> file loose files by extension
     };
 
     public static boolean isNativeTemplate(String template) {
@@ -254,6 +269,17 @@ public final class ShellAllowlist {
         // router's shell argv (cp + pm install) is fully hardcoded.
         if ("self_update".equals(template)) {
             return checkSelfUpdate(args);
+        }
+        // v1.24: files_* are gated by their OWN validator, before
+        // shared hygiene(), for the same reason as voice_bridge:
+        // a file name legitimately carries spaces and punctuation
+        // hygiene() bans for shell args, and these values NEVER
+        // become shell text — FileRouter consumes them as typed
+        // values (a code-mapped folder token + a direct-child name
+        // via java.io.File). checkFiles() re-implements the
+        // protections that matter per slot.
+        if (template.startsWith("files_")) {
+            return checkFiles(template, args);
         }
         String bad = hygiene(args);
         if (bad != null) return nRefuse(bad);
@@ -450,6 +476,93 @@ public final class ShellAllowlist {
         if (u.getUserInfo() != null) return nRefuse("url userinfo refused");
         return new NativeGate(true, "self_update", null, null,
                 new String[]{url, sha});
+    }
+
+    /**
+     * The files gate (v1.24): phone file management ops, gated per
+     * slot with FilePlan's fixed vocabularies. Folder slots are
+     * folder TOKENS (code-mapped in FilePlan to the public folders —
+     * a path can never be named). File-name slots are the words of
+     * one direct-child name, joined here with single spaces (the
+     * voice_bridge pattern): a real download name can never satisfy
+     * shared hygiene(), and it never becomes shell text —
+     * FileRouter hands it to java.io.File as a child name only.
+     * FilePlan.nameOk refuses separators / parent refs / dotfiles /
+     * control characters. Normalized slots ride NativeGate.args:
+     * list {folder, offset|""}; hash/trash {folder, name};
+     * move {folder, dest, name}; organize {folder}; access/summary {}.
+     */
+    private static NativeGate checkFiles(String template, List<String> args) {
+        switch (template) {
+            case "files_access":
+            case "files_summary":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return new NativeGate(true, template, null, null, new String[0]);
+            case "files_organize":
+                if (args.size() != 1 || !FilePlan.folderOk(args.get(0))) {
+                    return nRefuse("needs <folder>");
+                }
+                return new NativeGate(true, template, null, null,
+                        new String[]{args.get(0)});
+            case "files_list": {
+                if (args.size() < 1 || args.size() > 2
+                        || !FilePlan.folderOk(args.get(0))) {
+                    return nRefuse("needs <folder> [offset]");
+                }
+                String offset = "";
+                if (args.size() == 2) {
+                    if (!ok(FILE_OFFSET, args.get(1))) {
+                        return nRefuse("bad offset");
+                    }
+                    offset = args.get(1);
+                }
+                return new NativeGate(true, template, null, null,
+                        new String[]{args.get(0), offset});
+            }
+            case "files_hash":
+            case "files_trash": {
+                if (args.size() < 2 || !FilePlan.folderOk(args.get(0))) {
+                    return nRefuse("needs <folder> <name...>");
+                }
+                String name = joinName(args, 1);
+                if (name == null) return nRefuse("bad file name");
+                return new NativeGate(true, template, null, null,
+                        new String[]{args.get(0), name});
+            }
+            case "files_move": {
+                if (args.size() < 3 || !FilePlan.folderOk(args.get(0))
+                        || !FilePlan.folderOk(args.get(1))) {
+                    return nRefuse("needs <folder> <dest-folder> <name...>");
+                }
+                if (args.get(0).equals(args.get(1))) {
+                    return nRefuse("source and destination folder are the same");
+                }
+                String name = joinName(args, 2);
+                if (name == null) return nRefuse("bad file name");
+                return new NativeGate(true, template, null, null,
+                        new String[]{args.get(0), args.get(1), name});
+            }
+            default:
+                return nRefuse("unknown native template");
+        }
+    }
+
+    /** Join args[from..] with single spaces into one file name and
+     *  validate it as a typed value: 1..16 words, each 1..256 chars,
+     *  joined at most 512 chars, then FilePlan.nameOk's rules
+     *  (no separators, no parent refs, no dotfiles, no controls). */
+    private static String joinName(List<String> args, int from) {
+        if (args.size() - from > 16) return null;
+        StringBuilder sb = new StringBuilder();
+        for (int i = from; i < args.size(); i++) {
+            String a = args.get(i);
+            if (a == null || a.isEmpty() || a.length() > 256) return null;
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(a);
+            if (sb.length() > 512) return null;
+        }
+        String name = sb.toString();
+        return FilePlan.nameOk(name) ? name : null;
     }
 
     /**

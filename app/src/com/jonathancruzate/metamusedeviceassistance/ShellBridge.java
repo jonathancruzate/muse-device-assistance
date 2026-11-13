@@ -83,6 +83,8 @@ public final class ShellBridge {
                     ? WearInstallRouter.execute(ctx, ng.args)
                     : "self_update".equals(ng.op)
                     ? SelfUpdateRouter.execute(ctx, ng.args)
+                    : ng.op.startsWith("files_")
+                    ? FileRouter.execute(ctx, ng.op, ng.args)
                     : NativeCommands.execute(ctx, ng.op);
             BridgeLog.log(ctx, "SHELL", logId + " native " + template
                     + " -> ok=" + r.ok + " " + r.ms + "ms"
@@ -147,6 +149,8 @@ public final class ShellBridge {
             // report had NO version field, which repeatedly forced
             // blind diagnosis of which build the phone was running).
             o.put("self_update", SelfUpdateRouter.snapshot(ctx));
+            // v1.24: phone file management state (access + last op).
+            o.put("files", FileRouter.snapshot(ctx));
             if (Store.getLong(ctx, Store.K_TORCH_AT, 0) > 0) {
                 o.put("torch_on", Store.getBool(ctx, Store.K_TORCH_ON, false));
             }

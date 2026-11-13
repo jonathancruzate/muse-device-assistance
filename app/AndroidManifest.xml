@@ -59,6 +59,17 @@
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <!-- v1.24 phone file management: All Files Access is the
+         capability gate for the files_* commands (list / hash /
+         move / trash / organize over the public folders). It is a
+         special app access, not a runtime permission: declared
+         here, granted ONCE by Jonathan in Settings (the in-app
+         Phone files section links straight to the grant page),
+         checked at runtime via Environment.isExternalStorageManager.
+         Without the grant every files_* op except files_access
+         refuses typed. Sideloaded owner-device app; no Play
+         policy surface. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <!-- v1.12: the v1.7 Health Connect channel and its framework HC
          permission declarations (health.READ_SLEEP/STEPS/HEART_RATE/
          EXERCISE) are REMOVED — health data is owned by the Muse

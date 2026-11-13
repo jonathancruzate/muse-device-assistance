@@ -649,3 +649,26 @@ The v1.22.0 of record is the union build (theme + the v1.21
 self-update sources, versionCode 33, APK SHA-256
 93dca12e049535e8766be8bb2d3d426de5cd4e589eba92ef160dd7a06c12b88b),
 delivered to the phone by the self-update path itself.
+
+## v1.24.0 (2026-11-13)
+
+Phone file management (Jonathan's order: local files on the phone,
+e.g. Downloads, had zero coverage): seven native `files_*`
+templates gated by `ShellAllowlist.checkFiles`, executed by
+`FileRouter` via `java.io.File` with the pure-Java `FilePlan`
+tables — folder tokens (`download|documents|dcim|pictures|movies|music`)
+code-mapped to the public folders, file names as typed direct-child
+values, never shell text. `files_access` / `files_summary` /
+`files_list` (paged) / `files_hash` / `files_move` (no overwrite,
+size-verified) / `files_trash` (recoverable MOVE to
+`.muse-trash/<folder>/` with a ledger — no delete template exists)
+/ `files_organize` (extension-category filing for download and
+documents; <1 h old files never touched; cap 100/run). Capability
+gate is Android All Files Access, granted once by Jonathan in the
+app's new Phone files section; report gains `shell_bridge.files`
+(whitelisted in both report sanitizers the same night). Gate suite
+ALL_PASS; build guards green; versionCode 35, APK SHA-256
+`23c69c93f410a5daa5ec58155d8e10063284cc80ae290cbc9a51756d5f7ac316`,
+family cert unchanged. Delivered via `self_update` (enqueued
+2026-11-13; lands on the phone's next fetch cycle). Design:
+`docs/v1.24-phone-files-2026-11-13.md`.

@@ -50,7 +50,7 @@ are the same document — update both in the same handling, always.
   Bridge" was uninstalled after the verified cutover)
 - **Version source of truth:** `app/build.sh` — `VERSION_NAME` /
   `VERSION_CODE` in that script, backed by the build records in
-  `github-export/README.md`. Current: **v1.22.0, versionCode 33** (this line was stale at v1.5.1 until the 2026-11-12 correction; app/build.sh is always the truth)
+  `github-export/README.md`. Current: **v1.24.0, versionCode 35** (this line was stale at v1.5.1 until the 2026-11-12 correction; app/build.sh is always the truth)
   (APK `app/Muse-Device-Assistance-1.3.2.apk`, SHA-256
   `3b2adc07d64eb000369f316bfa6f713a376e49c357109aba842166d82ab06166`,
   rebuilt from the renamed canonical tree 2026-11-05.
@@ -1694,3 +1694,100 @@ and delivered to the phone BY the self-update path itself (fetch
 03:07:08 EST, lastUpdateTime 03:07:16 EST, dumpsys-verified
 1.22.0/33) — the second live self-update, and the first carrying
 a real version bump. This union build is the v1.22.0 of record.
+
+## v1.24.0 — phone file management (built 2026-11-13)
+
+Jonathan (2026-11-11): "I mean local files on my phone such as the
+downloads folder." Verification showed phone local files had ZERO
+coverage — the S24+'s 43 paired-device commands include no file
+command, the shell allowlist had no file template, the app
+reported storage totals only, and no automation touched phone
+Downloads. He chose "build it into Device Assistance."
+
+**What shipped** (design: `docs/v1.24-phone-files-2026-11-13.md`):
+seven NATIVE templates gated by `ShellAllowlist.checkFiles` and
+executed by `FileRouter` via `java.io.File` — typed values, never
+shell text (real names carry spaces the shell hygiene bans).
+Folder slots are TOKENS code-mapped in the pure-Java `FilePlan`
+(`download|documents|dcim|pictures|movies|music` — a path can
+never be named); name slots are word args joined into ONE
+direct-child name (separators / parent refs / dotfiles / controls
+refused).
+
+- `files_access` — All-Files-Access state + per-folder
+  exists/readable. The ONLY op allowed without the grant.
+- `files_summary` — per-folder recursive files/dirs/bytes/newest
+  (scan cap 4,000 entries/folder, flagged when hit).
+- `files_list <folder> [offset]` — direct children, newest first,
+  pages of 40: `F|D | size | mtimeMs | name`.
+- `files_hash <folder> <name…>` — streaming SHA-256 (≤1 GB).
+- `files_move <folder> <dest-folder> <name…>` — rename, never
+  overwrites, size-verified.
+- `files_trash <folder> <name…>` — MOVE to
+  `/storage/emulated/0/.muse-trash/<folder>/` + ledger line in
+  `.muse-trash/ledger.txt` (collision → ` (2)` suffix). **There
+  is no delete template; nothing is ever permanently deleted.**
+  Restore = `files_move` back.
+- `files_organize <folder>` — files loose direct children into
+  Images / Documents / Archives / APKs / Audio / Video subfolders
+  by extension (table in `FilePlan`). download/documents ONLY;
+  files <1 h old never touched (in-progress downloads); dotfiles
+  and crdownload/part/tmp never filed; cap 100 moves/run; returns
+  per-category counts + skips + the moved list.
+
+**Access gate — the grant IS the switch:** manifest declares
+`MANAGE_EXTERNAL_STORAGE`; every op except `files_access`
+requires `Environment.isExternalStorageManager()`, granted ONCE
+by Jonathan (MainActivity's new **Phone files** section → "Grant
+All Files Access", which also carries an "Inventory Downloads
+now" button + last-op state). No Store toggle, no scoped-storage
+fallback — a partial view would silently under-report, the exact
+defect this feature fixes. Without the grant, ops refuse typed
+`files_access_not_granted`. Drive via the usual driver, singly:
+`phone-bridge-cmd.sh enqueue files_list download`.
+
+**Report:** `shell_bridge.files {access_granted, last_op,
+last_detail, last_at}` (state only, never file names) — whitelisted
+in BOTH report sanitizers in the same handling (mode-sync Worker
+deployed 2026-11-13 with bindings preserved; box device-relay
+patched + restarted), per the v1.21 lesson.
+
+**Build record:** versionCode 35 / 1.24.0 on the v1.23.0 tree; gate
+suite ALL_PASS incl. ~35 new v1.24 cases (gates + FilePlan filing
+rules); full build guards green (75 app classes); APK
+`app/Muse-Device-Assistance-1.24.0.apk`, 6,113,445 bytes, SHA-256
+`23c69c93f410a5daa5ec58155d8e10063284cc80ae290cbc9a51756d5f7ac316`,
+family cert unchanged (4dcb45fa…7236). Delivery: rsynced to the
+box serve dir (sha verified on-box), `self_update` enqueued
+cmd-501ed435 with a 6 h TTL — the phone was not fetching commands
+at ship time (overnight doze; earlier commands also pending), so
+the install lands on its next fetch cycle; verification = a fresh
+report at 1.24.0 + a `files_access` result from the new build,
+then `files_list download` goes live the moment Jonathan makes
+the one-time grant.
+
+**Live verification + first management pass (2026-11-13, later):**
+Jonathan granted All Files Access in-app ("Done"); `self_update`
+cmd-501ed435 delivered 04:34 EST on the phone's next fetch cycle.
+`files_access` (cmd-7277371b) returned **granted=true** with all
+six folders present + readable — v1.24.0 LIVE-VERIFIED. First
+inventory (cmd-acae6ff8): download 572 files / 25 dirs / 4.88 GB ·
+documents 6 files · dcim 2,375 files / 54.4 GB · pictures 3,985
+files / 2.17 GB (scan capped) · movies 383 / 401 MB · music 4 /
+20 MB. First pass: five `files_organize download` runs filed
+**474 files** (Documents ~326, APKs ~78, Images ~50, Archives ~19,
+Video 1) into category subfolders + 2 in documents; Download went
+from 536 loose children to **67** (category dirs + genuinely
+ambiguous loose files: extensionless APKs, .apkm, .macro/.mdr,
+.ics). Loose sensitive files noted in the first list page
+(Google Passwords.csv, github-recovery-codes.txt) were filed
+on-device by category like everything else — never read, never
+uploaded.
+
+**Standing automation (2026-11-13):** cron `phone-files-weekly`
+(owner goal:drive-and-onedrive-organization, Sundays 07:22 ET,
+right after drive-organizer-weekly) runs the weekly pass —
+files_access gate → files_summary → organize download+documents
+→ verify — under hard rules: media folders inventory-only,
+never trash/delete, nothing leaves the phone; it reports as the
+Phone Files line alongside the Drive+OneDrive weekly report.
