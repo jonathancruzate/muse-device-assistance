@@ -833,6 +833,14 @@ long-press or the widget.
   worn; when buds state can't be confirmed, fall back to the
   normal channel judgment (chat / the checklist) rather than
   assuming buds-in.
+  **Update 2026-11-13:** the connected-buds run happened —
+  `buds status` and `buds noise anc` / `ambient` / `off` are
+  LIVE-VERIFIED (plugin v1.0.6; set commands confirm via the
+  post-command EXTENDED_STATUS_UPDATED frame, byte [12] —
+  this firmware sends no RESP/ACK). Detection confidence now
+  rests on a proven read: a fresh export showing connected +
+  worn is confirmed buds state (field-level caveats in the
+  `local-galaxy-buds` skill).
 - **Optional and off by default.** The module ships disabled; Jonathan
   enables it (and its accessibility service) in the app. Disabled
   means the capability does not exist, not that it is merely unused.

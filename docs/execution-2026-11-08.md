@@ -1068,3 +1068,85 @@ Precondition at fire time, independently observed: belief
 - github-export snapshot synced (sources, build.sh, this
   record, SKILL.md, README build record). Push not run, per the
   established pattern.
+
+## (l) Galaxy Buds set-verb investigation — the frame was right; the confirmation was wrong (2026-11-13 ~03:16–04:00 EST)
+
+Jonathan approved option (a) — investigate whether the plugin's
+NOISE_CONTROLS frame is wrong or the generic SPP service is
+read-only — after the v1.0.4 status verification (§i follow-on,
+2026-11-13 ~03:01 EST) left `buds noise anc` at `resp_timeout`.
+
+### 1. Frame audit — no difference
+
+The plugin's wire frame for msg 120 (`fd 04 00 78 <mode> <crc16-le>
+dd`; SOM FD, LE size = 1+payload+2, CRC16-CCITT over id‖payload
+little-endian) is byte-identical to upstream GalaxyBudsClient's
+`SppMessage.Encode` + `NoiseControlPageViewModel` (1-byte mode
+payload). Handshake identical too (`MANAGER_INFO {1,1,SDK_INT}`,
+UPDATE_TIME 12-byte LE). Message ids all match upstream's enum
+(RESP 81, ACK 66, NOISE_CONTROLS_UPDATE 119, NOISE_CONTROLS 120).
+The codec's own JVM vector test independently pins the CRC byte
+order. DESIGN.md §1.2's "big-endian CRC" phrasing is a red herring.
+
+### 2. Session audit — status never proved a solicited reply
+
+Status and set share one code path (connect → MANAGER_INFO +
+UPDATE_TIME → await status → command). Status "success" rides the
+buds' unsolicited frames (our parser CRC-verifies each; we echo
+RESP per frame). Before this investigation, no buds→host solicited
+response of any kind had ever been observed on the generic channel.
+
+### 3. Live discriminating probes (v1.0.5, logcat tag MuseBudsSpp)
+
+v1.0.5 added ACK(66) handling + full TX/RX hex logging. Baseline
+`buds noise anc` on v1.0.4 reproduced `resp_timeout` exactly
+(cmd-9d27a366). On v1.0.5, both `noise anc` (cmd-400c1886) and
+`noise off` (cmd-9863161c) still timed out — but the transcripts
+showed why: after TX 120, NO ACK (66), NO RESP (81), NO 119 ever
+arrives. What arrives ~4.8 s after each send is an
+EXTENDED_STATUS_UPDATED (39 B, rev 11) whose payload [12] equals
+the requested mode (01 after ANC, 00 after OFF) — per
+GalaxyBudsClient's ExtendedStatusUpdateDecoder,
+`NoiseControlMode = Payload[12]`, and upstream's noise page
+consumes exactly that field as one of its two confirmation paths.
+The commands had been applied all along.
+
+### 4. Fix (v1.0.6, versionCode 7) + verification
+
+- Confirmation = first of ACK(66) / RESP(81)==0 / a NEW
+  post-command extended-status frame with [12] == requested mode
+  (9 s window; the confirm expectation is armed before the send).
+- Decoder: ≥24-byte extended frames now decode the ≥BudsLive
+  layout — [9] EqualizerMode, [10] bit7 touch lock (upstream's
+  inverted derivation), [12] NoiseControlMode, [23]
+  AmbientSoundVolume, [7] case battery when > 0.
+- APK `Muse-Galaxy-Buds-1.0.6.apk`, SHA-256
+  `9d3ee5a839058eb6bab761576db8694664038d34c1c83ee4245007a4f457eea6`,
+  same signing cert; installed in place (`adb install -r`,
+  dumpsys versionName=1.0.6).
+- LIVE-VERIFIED in one run: `buds noise anc` (cmd-9bda09ee) exit 0
+  — log "answer for msg 120 via ext_status", read-back noise=anc;
+  `buds noise ambient` (cmd-d48b9710) exit 0 — [12]=2,
+  noise=ambient; `buds noise off` (cmd-be17cf58) exit 0 —
+  noise=off. Final state left OFF, as found. One trailing
+  status-only fire timed out at the CLI's 120 s cap (phone in
+  Sleep mode, ~03:52 EST) — the fire-5 export already carried the
+  post-change read-back, so verification does not rest on it.
+- Verdict: hypothesis A in refined form — frame byte-correct,
+  channel writable; three successive confirmation disciplines
+  (RESP → ACK → extended status) were the whole bug. The
+  Samsung take-over question is moot and was never touched:
+  berrymgr/budsunitemgr untouched, no link seized.
+
+### 5. Records
+
+- Connector doc `custom.galaxy-buds/CONNECTOR.md`: status line,
+  command table (noise rows verified), Read-back, and Limits
+  rewritten to the v1.0.6 truth.
+- Companion skill `local-galaxy-buds` (both copies, identical):
+  v1.0.6 facts + the set-verb resolution section.
+- github-export snapshot tree refreshed (SKILL.md, build.sh,
+  SppCodec/BudsSppSession/BudsStatus sources); push per the
+  established pattern.
+- Health space row for custom.galaxy-buds → healthy via
+  saverepairverdict; needs-you dcb5c7af resolved.
