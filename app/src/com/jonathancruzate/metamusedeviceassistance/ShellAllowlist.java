@@ -157,6 +157,20 @@ public final class ShellAllowlist {
             // and mechanical; the context file is the semantic
             // portion). Executed by VoiceBridge.executeCombined.
             "voice_call",
+            // ---- v1.21 loopback self-update ----
+            // args: <url> <sha256> -> SelfUpdateRouter: the app
+            // downloads its OWN update APK, verifies the sha256,
+            // and installs it through the loopback shell bridge
+            // (cp to /data/local/tmp + pm install -r, argv fully
+            // hardcoded in the router) — so DA releases never again
+            // depend on an external ADB lane being authorized. The
+            // command can only ever name THIS app's update payload:
+            // the router installs exactly one staged file as exactly
+            // this package. Gated by the dedicated
+            // checkSelfUpdate() validator (URL + sha slots, same
+            // reasoning as checkWearInstall: typed values, never
+            // shell text).
+            "self_update",
     };
 
     public static boolean isNativeTemplate(String template) {
@@ -232,6 +246,14 @@ public final class ShellAllowlist {
         // no control characters, no quote/backtick characters.
         if ("voice_bridge".equals(template)) {
             return checkVoiceBridge(args);
+        }
+        // v1.21: self_update is gated by its OWN validator, before
+        // shared hygiene(), for the same reason as wear_install_face:
+        // its slots carry a URL and a sha256 that hygiene()'s charset
+        // can never accept, and they NEVER become shell text — the
+        // router's shell argv (cp + pm install) is fully hardcoded.
+        if ("self_update".equals(template)) {
+            return checkSelfUpdate(args);
         }
         String bad = hygiene(args);
         if (bad != null) return nRefuse(bad);
@@ -371,6 +393,63 @@ public final class ShellAllowlist {
         if (u.getUserInfo() != null) return nRefuse("url userinfo refused");
         return new NativeGate(true, "wear_install", null, null,
                 new String[]{label, url, sha});
+    }
+
+    /** The one cleartext host a self_update URL may use: the Hetzner
+     *  box's Tailscale address — the same single host the manifest's
+     *  network security config has whitelisted for cleartext since
+     *  v1.12 (the relay LAN). Every other http URL is refused. */
+    private static final String UPDATE_CLEARTEXT_HOST = "100.85.53.70";
+
+    /**
+     * The self_update gate (v1.21): two typed slots — URL, sha256.
+     * URL rules mirror checkWearInstall (length, character bans,
+     * parseable, host present, no userinfo) with ONE widening and
+     * ONE narrowing. Widening: plain http is allowed ONLY to
+     * UPDATE_CLEARTEXT_HOST (the box tailnet endpoint already
+     * sanctioned for cleartext in the manifest); https is allowed
+     * to any host. Narrowing vs wear: nothing else — the payload is
+     * additionally pinned by the sha256, which the router verifies
+     * streaming before anything is staged, and the staged file can
+     * only ever be installed as this app (pm refuses a mismatched
+     * package/signature), so a hostile payload cannot become another
+     * app or a different signer.
+     */
+    private static NativeGate checkSelfUpdate(List<String> args) {
+        if (args.size() != 2) return nRefuse("needs <url> <sha256>");
+        String url = args.get(0);
+        String sha = args.get(1);
+        if (!ok(SHA256_HEX, sha)) return nRefuse("bad sha256");
+        if (url == null || url.length() < 10 || url.length() > 2048) {
+            return nRefuse("bad url length");
+        }
+        for (int i = 0; i < url.length(); i++) {
+            char c = url.charAt(i);
+            if (Character.isWhitespace(c) || c < 0x20 || c == 0x7F
+                    || c == '"' || c == '\'' || c == '`' || c == '\\'
+                    || c == '<' || c == '>' || c == '#') {
+                return nRefuse("bad url character");
+            }
+        }
+        java.net.URI u;
+        try {
+            u = new java.net.URI(url);
+        } catch (Exception e) {
+            return nRefuse("unparseable url");
+        }
+        String scheme = u.getScheme();
+        boolean https = "https".equalsIgnoreCase(scheme);
+        boolean boxHttp = "http".equalsIgnoreCase(scheme)
+                && UPDATE_CLEARTEXT_HOST.equals(u.getHost());
+        if (!https && !boxHttp) {
+            return nRefuse("url must be https (http only to the box)");
+        }
+        if (u.getHost() == null || u.getHost().isEmpty()) {
+            return nRefuse("url has no host");
+        }
+        if (u.getUserInfo() != null) return nRefuse("url userinfo refused");
+        return new NativeGate(true, "self_update", null, null,
+                new String[]{url, sha});
     }
 
     /**

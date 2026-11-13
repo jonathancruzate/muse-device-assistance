@@ -81,6 +81,8 @@ public final class ShellBridge {
                     ? BudsRouter.execute(ctx, ng.op, ng.arg)
                     : "wear_install".equals(ng.op)
                     ? WearInstallRouter.execute(ctx, ng.args)
+                    : "self_update".equals(ng.op)
+                    ? SelfUpdateRouter.execute(ctx, ng.args)
                     : NativeCommands.execute(ctx, ng.op);
             BridgeLog.log(ctx, "SHELL", logId + " native " + template
                     + " -> ok=" + r.ok + " " + r.ms + "ms"
@@ -140,6 +142,11 @@ public final class ShellBridge {
             // ignore unknown keys).
             o.put("voice_enabled", Store.getBool(ctx, Store.K_VOICE_ENABLED, false));
             o.put("voice_active", Store.getBool(ctx, Store.K_VOICE_ACTIVE, false));
+            // v1.21: the report always carries the app's own version
+            // + the last self-update job's state (before v1.21 the
+            // report had NO version field, which repeatedly forced
+            // blind diagnosis of which build the phone was running).
+            o.put("self_update", SelfUpdateRouter.snapshot(ctx));
             if (Store.getLong(ctx, Store.K_TORCH_AT, 0) > 0) {
                 o.put("torch_on", Store.getBool(ctx, Store.K_TORCH_ON, false));
             }

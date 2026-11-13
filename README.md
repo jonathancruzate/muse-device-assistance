@@ -626,9 +626,26 @@ actuation is untouched and still defaults DISARMED.
   (wireless debugging endpoint refused), so this build is
   staged, not installed.
 
+## v1.21.0 (2026-11-13)
+
+Loopback self-update: new gated native template `self_update`
+(<url> <sha256>) — the app downloads its own update APK with
+streaming SHA-256 verification and installs it through the
+loopback shell bridge (cp to /data/local/tmp + pm install -r),
+so releases no longer depend on an external ADB lane being
+authorized (the Nov 10–13 pairing lapse stranded v1.19/v1.20
+for ~3 days). The report's shell_bridge gains a `self_update`
+object that always carries the running app version — the report
+previously had no version field at all. Proven live the night
+it shipped: the phone fetched the APK from the Hetzner box and
+reinstalled itself 9 seconds later, no external ADB involved.
+
 ## v1.22.0 (2026-11-13)
 
 Muse-app theme: new MuseTheme carrying the VDS palette
 decomposed from the official Muse app (accent #0064D4 /
 #007FFD, grounds #FCFCFC / #050505, text #111112 / #F5F5F5).
-Theme-only release; no behavior changes.
+The v1.22.0 of record is the union build (theme + the v1.21
+self-update sources, versionCode 33, APK SHA-256
+93dca12e049535e8766be8bb2d3d426de5cd4e589eba92ef160dd7a06c12b88b),
+delivered to the phone by the self-update path itself.

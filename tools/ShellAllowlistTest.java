@@ -162,6 +162,48 @@ public class ShellAllowlistTest {
             List.of("label", "https://h.example/a.apk\";reboot", wSha)).allowed,
             "wear_install_face url injection refused");
 
+    // v1.21 self_update gate: <url> <sha256>; https anywhere, http
+    // ONLY to the box tailnet host; args ride NativeGate.args.
+    ShellAllowlist.NativeGate uOk = ShellAllowlist.checkNative("self_update",
+            List.of("https://h.example/da.apk", wSha));
+    expect(uOk.allowed && "self_update".equals(uOk.op)
+            && uOk.args != null && uOk.args.length == 2
+            && "https://h.example/da.apk".equals(uOk.args[0])
+            && wSha.equals(uOk.args[1]), "self_update https allowed (op+args)");
+    ShellAllowlist.NativeGate uBox = ShellAllowlist.checkNative("self_update",
+            List.of("http://100.85.53.70:8795/da.apk", wSha));
+    expect(uBox.allowed && "self_update".equals(uBox.op),
+            "self_update http to box allowed");
+    expect(!ShellAllowlist.checkNative("self_update",
+            List.of("http://h.example/da.apk", wSha)).allowed,
+            "self_update http elsewhere refused");
+    expect(!ShellAllowlist.checkNative("self_update",
+            List.of("http://100.85.53.71/da.apk", wSha)).allowed,
+            "self_update http to box-lookalike refused");
+    expect(!ShellAllowlist.checkNative("self_update",
+            List.of("https://h.example/da.apk", "xyz")).allowed,
+            "self_update bad sha refused");
+    expect(!ShellAllowlist.checkNative("self_update",
+            List.of("https://h.example/da.apk", wSha.toUpperCase())).allowed,
+            "self_update uppercase sha refused");
+    expect(!ShellAllowlist.checkNative("self_update",
+            List.of("https://h.example/da.apk")).allowed,
+            "self_update 1 arg refused");
+    expect(!ShellAllowlist.checkNative("self_update",
+            List.of("https://h.example/da.apk", wSha, "extra")).allowed,
+            "self_update 3 args refused");
+    expect(!ShellAllowlist.checkNative("self_update",
+            List.of("https://user@h.example/da.apk", wSha)).allowed,
+            "self_update userinfo refused");
+    expect(!ShellAllowlist.checkNative("self_update",
+            List.of("https://h.example/a b.apk", wSha)).allowed,
+            "self_update url with space refused");
+    expect(!ShellAllowlist.checkNative("self_update",
+            List.of("https://h.example/da.apk\";reboot", wSha)).allowed,
+            "self_update url injection refused");
+    expect(ShellAllowlist.isNativeTemplate("self_update"),
+            "self_update is a native template");
+
     System.out.println(fails==0?"ALL_PASS":"FAILURES:"+fails);
   }
 }

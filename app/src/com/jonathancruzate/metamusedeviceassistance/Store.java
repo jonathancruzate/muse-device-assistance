@@ -135,6 +135,18 @@ public final class Store {
     public static final String K_WEAR_DETAIL = "wear_detail";
     public static final String K_WEAR_AT = "wear_at";
 
+    // Self-update (v1.21) — last self_update job's state, mirrored by
+    // SelfUpdateRouter and carried in the report's shell_bridge
+    // self_update object. Stage "installing" is written BEFORE pm
+    // runs because the install kills this process; the snapshot
+    // reconciles it to "installed" once the running versionCode no
+    // longer equals K_UPDATE_FROM.
+    public static final String K_UPDATE_SHA = "update_sha";
+    public static final String K_UPDATE_STAGE = "update_stage";
+    public static final String K_UPDATE_DETAIL = "update_detail";
+    public static final String K_UPDATE_AT = "update_at";
+    public static final String K_UPDATE_FROM = "update_from_code";
+
     // Push channels (v1.6) — local push replacement, design
     // docs/local-push-replacement-v1.6-design-2026-11-09.md §4.
     // Every channel is Jonathan-controlled: its own Store key, OFF by

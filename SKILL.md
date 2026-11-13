@@ -50,7 +50,7 @@ are the same document — update both in the same handling, always.
   Bridge" was uninstalled after the verified cutover)
 - **Version source of truth:** `app/build.sh` — `VERSION_NAME` /
   `VERSION_CODE` in that script, backed by the build records in
-  `github-export/README.md`. Current: **v1.21.0, versionCode 32** (this line was stale at v1.5.1 until the 2026-11-12 correction; app/build.sh is always the truth)
+  `github-export/README.md`. Current: **v1.22.0, versionCode 33** (this line was stale at v1.5.1 until the 2026-11-12 correction; app/build.sh is always the truth)
   (APK `app/Muse-Device-Assistance-1.3.2.apk`, SHA-256
   `3b2adc07d64eb000369f316bfa6f713a376e49c357109aba842166d82ab06166`,
   rebuilt from the renamed canonical tree 2026-11-05.
@@ -1572,3 +1572,16 @@ Installed -r via the ADB lane, dumpsys verified (code 33);
 MainActivity resumed with no crash after a test launch (the
 verification screencap was black because the display was off
 overnight; visual check lands when the app is next opened).
+
+## v1.22.0 union addendum (2026-11-13, later)
+
+The theme build above (SHA `2a13dadb…`) was compiled before the
+v1.21 self-update sources merged, so it did not contain them.
+The trees were unioned the same night: canonical sources are now
+theme (v1.22) + self-update (v1.21) at versionCode 33, rebuilt as
+APK SHA-256
+`93dca12e049535e8766be8bb2d3d426de5cd4e589eba92ef160dd7a06c12b88b`
+and delivered to the phone BY the self-update path itself (fetch
+03:07:08 EST, lastUpdateTime 03:07:16 EST, dumpsys-verified
+1.22.0/33) — the second live self-update, and the first carrying
+a real version bump. This union build is the v1.22.0 of record.
