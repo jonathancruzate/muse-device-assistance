@@ -1081,43 +1081,47 @@ long-press or the widget.
   * The two-command decomposition (voice_mode on → wait →
     voice_bridge) remains the manual fallback when the combined
     fire itself is the thing under test.
-- **Departure-escalation driver — the calendar ladder escalates
-  to a `voice_call` (first live use 2026-11-14, HYUN dinner;
-  Jonathan's order the same day: "make sure that whole workflow
-  … is captured in our device Assistance skill"):** the driver
-  behind a wake-up call is the calendar-event-stream departure
-  ladder, not a standalone decision. The ladder runs in chat
-  first (Stage 1 at leave-by −30 min, Stage 2 at leave-by
-  −5 min, then the post-departure +5/+15/+30 escalations). Main
-  escalates from chat nudges to ONE `voice_call` when ALL of
-  these hold: (1) the chat rungs are exhausted with **no
-  confirmed departure** — location still reads home and he has
-  not replied; (2) the event is **high-stakes** — a reservation
-  with a late-cancel fee, another person waiting on him, a hard
-  start time; the stream's SPEAK-TO-FIRE line on the Stage 2
-  rung is the signal main adjudicates; (3) **no never-speak
-  gate holds** — the gates are Night mode, inside a Sleep
-  block, and at work. An unplanned nap outside any Sleep block
-  with the house in Home mode is NOT a gate: that is exactly
-  the case this escalation exists for. Lower-stakes rungs stay
-  chat-only — the same afternoon, the CVS pickup ladder
-  exhausted every chat rung and main did NOT fire voice (a
-  deferrable errand; the prescription was held for days), and
-  main said so in the final nudge instead. Execution, as run
-  2026-11-14: Stage 1 (15:20) and Stage 2 (15:45) delivered in
-  chat, no reply, location home at 15:46; pre-flight
-  `media_volume_get` read **1 of 15** → `media_volume_set 10`
-  → read-back verified 10; payload protocol v2
-  (`~/workspace/voice_context.md` + the payload posted to the
-  main chat before firing); single `enqueue voice_call`
-  (cmd-43c58bf2, 15:53 EST). The session connected, he woke,
-  asked his question in-call ("Do I have time to shower
-  quick?"), took the concrete answer (shower costs the 4:10
-  train; the 4:22 lands him ~10 min late), chose it, and left —
-  departure saved, dinner not missed. **Payload shape for a
-  departure:** the current time, leave-now, and the ONE routing
-  fact that decides it (the specific train and what missing it
-  costs in arrival time) — one decision, not a briefing.
+- **Contextual voice-call driver — when Muse calls him
+  (general rule; Jonathan's correction 2026-11-14: "not
+  specific to departure — contextual need to call the user
+  per the user's needs"):** `voice_call` is how Muse reaches
+  Jonathan when the situation needs voice, not a chat message
+  he may never see. The trigger is contextual, judged per
+  situation: (1) **chat isn't landing** — no reply, phone
+  locked or face-down, he's away from the screen — AND (2)
+  **the matter warrants interrupting him now** — a deadline
+  he's about to miss, a decision only he can make that is
+  blocking work, something he would want to know immediately
+  rather than at his next glance at the phone. Chat goes
+  first whenever chat can work; voice is the escalation when
+  it demonstrably isn't reaching him or the deadline won't
+  survive the wait. The standing gates always win: **never in
+  Night mode, never inside a Sleep block, never at work** —
+  an unplanned nap outside any Sleep block with the house in
+  Home mode is NOT a gate. Known drivers that apply this rule:
+  the calendar departure ladder (Stage 1 / Stage 2 chat rungs
+  exhausted, no confirmed departure, high-stakes event — the
+  stream's SPEAK-TO-FIRE line is the signal main adjudicates);
+  Galaxy Buds connected + screen locked (the bullet above);
+  his standing agentring order ("call me every time you're
+  blocked and you need me"). Low-stakes or deferrable matters
+  stay chat-only: the same afternoon as the first live use,
+  the CVS pickup ladder exhausted every chat rung and main did
+  NOT fire voice (prescription held for days) — it said so in
+  the final nudge instead. **Payload shape:** the one thing he
+  needs to hear plus the single deciding fact, written for the
+  ear — one decision, not a briefing. **First live use
+  (2026-11-14, HYUN dinner, via the departure ladder):** Stage
+  1 (15:20) and Stage 2 (15:45) delivered in chat, no reply,
+  location home at 15:46; pre-flight `media_volume_get` read
+  **1 of 15** → `media_volume_set 10` → read-back verified 10;
+  payload protocol v2 (`~/workspace/voice_context.md` + the
+  payload posted to the main chat before firing); single
+  `enqueue voice_call` (cmd-43c58bf2, 15:53 EST). The session
+  connected, he woke, asked his question in-call ("Do I have
+  time to shower quick?"), took the concrete answer (shower
+  costs the 4:10 train; the 4:22 lands him ~10 min late),
+  chose it, and left — departure saved, dinner not missed.
 - **Confirming a session actually started (chat-side evidence):**
   the Worker command result distinguishes "voice_mode=on
   dispatched" (fresh launch) from "voice_mode=on (already active,
