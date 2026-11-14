@@ -70,6 +70,14 @@ public final class ShellAllowlist {
             "^[0-9a-f]{64}$");
     // v1.24 phone file management validators (tables live in FilePlan).
     private static final Pattern FILE_OFFSET = Pattern.compile("^\\d{1,7}$");
+    // v1.25 screen sharing validators: normalized coordinates are
+    // 0..1000 on each axis (range-checked after the shape check);
+    // swipe duration is bounded so a stroke can never be a press-
+    // and-hold accident or a no-op flick.
+    private static final Pattern COORD = Pattern.compile("^\\d{1,4}$");
+    private static final Pattern SWIPE_MS = Pattern.compile("^\\d{2,4}$");
+    private static final Pattern SCREEN_KEY = Pattern.compile(
+            "^(back|home|recents|notifications|quick_settings|lock)$");
     // STREAM_MUSIC range on this device, proven 2026-11-08 via
     // `cmd media_session volume --stream 3 --get` ("range [0..15]").
     private static final int MEDIA_VOL_MAX = 15;
@@ -186,6 +194,23 @@ public final class ShellAllowlist {
             "files_move",      // args: <folder> <dest-folder> <name...>
             "files_trash",     // args: <folder> <name...> -> move to .muse-trash
             "files_organize",  // args: <folder> -> file loose files by extension
+            // ---- v1.25 screen sharing ----
+            // Executed by ScreenRouter (design:
+            // docs/v1.25-screen-sharing-design-2026-11-13.md).
+            // Coordinates are normalized 0..1000 on both axes,
+            // scaled to pixels on-device. screen_text /
+            // screen_find_tap carry free text and are gated by the
+            // dedicated checkScreenText() — typed values handed to
+            // the accessibility service, never shell text.
+            "screen_status",   // args: none -> module/stream state
+            "screen_shot",     // args: none -> one accessibility snapshot, uploaded
+            "screen_start",    // args: none -> request MediaProjection consent + stream
+            "screen_stop",     // args: none -> stop the stream
+            "screen_tap",      // args: <x 0..1000> <y 0..1000>
+            "screen_swipe",    // args: <x1> <y1> <x2> <y2> <ms 50..2000>
+            "screen_key",      // args: <back|home|recents|notifications|quick_settings|lock>
+            "screen_text",     // args: <words...> -> type into the focused field
+            "screen_find_tap", // args: <label words...> -> tap the exactly-labelled node
     };
 
     public static boolean isNativeTemplate(String template) {
@@ -281,6 +306,16 @@ public final class ShellAllowlist {
         if (template.startsWith("files_")) {
             return checkFiles(template, args);
         }
+        // v1.25: screen_text / screen_find_tap carry free text (a
+        // label can contain spaces and punctuation), gated by their
+        // OWN validator before shared hygiene(), for the same
+        // reason as voice_bridge: the text NEVER becomes shell —
+        // ScreenGestures hands it to the accessibility service as a
+        // typed value. checkScreenText() re-implements the caps and
+        // control-character bans that matter here.
+        if ("screen_text".equals(template) || "screen_find_tap".equals(template)) {
+            return checkScreenText(template, args);
+        }
         String bad = hygiene(args);
         if (bad != null) return nRefuse(bad);
         switch (template) {
@@ -338,9 +373,77 @@ public final class ShellAllowlist {
                     return nRefuse("needs <on|off>");
                 }
                 return new NativeGate(true, "buds_lock", null, args.get(0));
+            // ---- v1.25 screen sharing (typed values ride args) ----
+            case "screen_status":
+            case "screen_shot":
+            case "screen_start":
+            case "screen_stop":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return new NativeGate(true, template, null, null,
+                        new String[0]);
+            case "screen_tap": {
+                if (args.size() != 2 || !coordOk(args.get(0)) || !coordOk(args.get(1))) {
+                    return nRefuse("needs <x 0..1000> <y 0..1000>");
+                }
+                return new NativeGate(true, template, null, null,
+                        new String[]{args.get(0), args.get(1)});
+            }
+            case "screen_swipe": {
+                if (args.size() != 5
+                        || !coordOk(args.get(0)) || !coordOk(args.get(1))
+                        || !coordOk(args.get(2)) || !coordOk(args.get(3))
+                        || !ok(SWIPE_MS, args.get(4))) {
+                    return nRefuse("needs <x1> <y1> <x2> <y2> <ms 50..2000>");
+                }
+                int ms = Integer.parseInt(args.get(4));
+                if (ms < 50 || ms > 2000) return nRefuse("swipe ms out of range");
+                return new NativeGate(true, template, null, null,
+                        new String[]{args.get(0), args.get(1), args.get(2),
+                                args.get(3), args.get(4)});
+            }
+            case "screen_key":
+                if (args.size() != 1 || !ok(SCREEN_KEY, args.get(0))) {
+                    return nRefuse("needs <back|home|recents|notifications|quick_settings|lock>");
+                }
+                return new NativeGate(true, template, null, null,
+                        new String[]{args.get(0)});
             default:
                 return nRefuse("unknown native template");
         }
+    }
+
+    /** Normalized coordinate shape + range (0..1000). */
+    private static boolean coordOk(String v) {
+        if (!ok(COORD, v)) return false;
+        int n = Integer.parseInt(v);
+        return n >= 0 && n <= 1000;
+    }
+
+    /**
+     * The screen text gate (v1.25): screen_text's words and
+     * screen_find_tap's label words, joined with single spaces into
+     * the one typed value ScreenRouter consumes. Rules: at least
+     * one arg; each arg 1..256 chars; joined total at most 1000
+     * chars; no control characters (the text is typed into a node /
+     * matched against node labels — it is never parsed, never
+     * shell). The joined text rides NativeGate.arg.
+     */
+    private static NativeGate checkScreenText(String template, List<String> args) {
+        if (args.isEmpty()) return nRefuse("needs <text...>");
+        StringBuilder sb = new StringBuilder();
+        for (String a : args) {
+            if (a == null || a.isEmpty() || a.length() > 256) {
+                return nRefuse("bad text arg");
+            }
+            for (int i = 0; i < a.length(); i++) {
+                char c = a.charAt(i);
+                if (c < 0x20 || c == 0x7F) return nRefuse("bad text character");
+            }
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(a);
+            if (sb.length() > 1000) return nRefuse("text too long");
+        }
+        return new NativeGate(true, template, null, sb.toString());
     }
 
     /**

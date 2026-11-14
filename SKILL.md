@@ -50,7 +50,7 @@ are the same document — update both in the same handling, always.
   Bridge" was uninstalled after the verified cutover)
 - **Version source of truth:** `app/build.sh` — `VERSION_NAME` /
   `VERSION_CODE` in that script, backed by the build records in
-  `github-export/README.md`. Current: **v1.24.0, versionCode 35** (this line was stale at v1.5.1 until the 2026-11-12 correction; app/build.sh is always the truth)
+  `github-export/README.md`. Current: **v1.25.0, versionCode 36** (this line was stale at v1.5.1 until the 2026-11-12 correction; app/build.sh is always the truth)
   (APK `app/Muse-Device-Assistance-1.3.2.apk`, SHA-256
   `3b2adc07d64eb000369f316bfa6f713a376e49c357109aba842166d82ab06166`,
   rebuilt from the renamed canonical tree 2026-11-05.
@@ -1834,3 +1834,101 @@ files_access gate → files_summary → organize download+documents
 → verify — under hard rules: media folders inventory-only,
 never trash/delete, nothing leaves the phone; it reports as the
 Phone Files line alongside the Drive+OneDrive weekly report.
+
+## v1.25.0 — screen sharing + takeover (built + installed 2026-11-13)
+
+Jonathan's order (2026-11-13 19:59 EST): Muse can see the phone's
+screen and take it over as needed. Design:
+`docs/v1.25-screen-sharing-design-2026-11-13.md`; execution record:
+`docs/v1.25-screen-sharing-2026-11-13.md`.
+
+**Shape — an optional module, same posture as voice/files.** The
+in-app "Screen sharing (v1.25)" switch (`screen_enabled`, default
+OFF) is Jonathan's alone. While off, every action verb refuses
+`screen_module_disabled` — the capability does not exist.
+`screen_status` always answers; `screen_stop` is exempt from the
+gate (a live stream must never be stranded by the switch).
+
+**See — two doors, because Android has two.**
+- `screen_shot`: one frame via the accessibility service's
+  `takeScreenshot` (config gained `canTakeScreenshot=true`).
+  No per-session consent — the standing accessibility grant is
+  the gate. Scaled to ≤1080 long edge, JPEG q68, uploaded to the
+  relay. A FLAG_SECURE window in front refuses (platform rule).
+- `screen_start` / `screen_stop`: a MediaProjection stream.
+  **Consent is a system dialog Android shows EVERY session; no
+  app can bypass it and this one does not try.** A remote start
+  tries to surface the consent activity, ALWAYS posts a tappable
+  "Start screen sharing" notification, and returns
+  `consent_required` — never claim a stream exists until
+  `screen_status` shows `streaming=true` with fresh frames.
+  `ScreenCaptureService` (mediaProjection FGS; persistent
+  notification with a Stop action; long edge ≤720; ~4 fps JPEG
+  q55; frames POSTed base64-in-JSON to the relay) auto-stops
+  after 10 minutes. While streaming it also drains the relay's
+  fast-input queue every ~750 ms, so viewer input lands near-live
+  instead of waiting out the 60 s bridge cycle; every fast input
+  is RE-validated on-device (the queue is a transport, never an
+  authority).
+
+**Take over — accessibility only, never shell `input`.**
+`screen_tap <x> <y>`, `screen_swipe <x1> <y1> <x2> <y2> <ms
+50..2000>`, `screen_key <back|home|recents|notifications|
+quick_settings|lock>`, `screen_text <words…>` (SET_TEXT on the
+focused editable), `screen_find_tap <label words…>` (exact
+text/content-description match, case-insensitive). Gestures run
+through `VoiceAccessibilityService.screen*Px/screenGlobal/
+screenTypeText/screenFindTap` via `dispatchGesture` + latch.
+**Coordinates are normalized 0..1000 on both axes** on every
+lane (bridge, fast queue, viewer); `ScreenGestures` scales to
+real pixels on-device. Gates: hygiene-path validators for
+coords/keys; dedicated `checkScreenText` for text/label (control
+chars banned, 256/arg, 1000 joined) because that text legitimately
+carries spaces/punctuation and never becomes shell.
+
+**Relay side.** All three repo relay copies + the deployed box
+relay gained: `POST /screen/frame` (JPEG magic check, 2 MB cap;
+latest frame stored as a BINARY file `store/screen_latest.jpg`),
+`GET /screen/frame.jpg` (raw), `GET /screen/meta`,
+`POST /screen/state`, `POST`/`GET /screen/input` (validated;
+cap 50; GET drains), `GET /screen/view` (self-contained viewer
+page — live frame, click=tap, drag=swipe, key buttons, type/find
+boxes, start/stop via bridge enqueue). A `__relayRaw` response
+shape was added to the JSON-only plumbing for the JPEG + HTML.
+Report sanitizer gained the `screen` whitelist (state only).
+**Drift caught + fixed in this handling:** the repo relay copies
+were MISSING the box's v1.21 `self_update` and v1.24 `files`
+sanitizer blocks (box-only since their deploys); they were ported
+back into all three repo copies, and the merged repo relay was
+verified a strict superset of the deployed file (zero box-only
+lines) before it replaced it (box backup:
+`server.js.bak-20261113-pre-v125-screen`).
+
+**Driving it:** `tools/screen.sh` — `shot` (enqueue + wait +
+download), `start`, `stop`, `status` (relay meta + bridge
+status), `tap|swipe|key|text|find` (fast queue while streaming,
+bridge lane otherwise), `fetch` (frame → `screen-out/latest.jpg`),
+`view` (prints the viewer URL; reads the relay token from the
+local token file — the URL is for Jonathan's browser on the
+tailnet). Frames only ever go to the configured relay base;
+frames are never written to phone storage; the consent grant is
+memory-only, never persisted or logged.
+
+**Build record:** versionCode 36 / 1.25.0; gate suite ALL_PASS
+incl. ~30 new screen cases; build guards green (86 app classes);
+APK `app/Muse-Device-Assistance-1.25.0.apk`, 6,125,733 bytes,
+SHA-256 `680bb5e7de9cd02d5880d3b9a7520f2ad0f4f201c3b7df9dfdcaf24b2e911d0e`,
+family cert unchanged. Install via `self_update` cmd-68e20790:
+phone fetched the APK from the one-shot box serve unit the second
+the command delivered; verified by the next report —
+`self_update {1.25.0, code 36, stage installed, from_code 35}` +
+`shell_bridge.screen` present. `screen_status` live-verified the
+same night (cmd-1af87f4d: `enabled=false accessibility=true
+streaming=false frames=0`).
+
+**NOT yet live-verified:** the see/control verbs themselves —
+they wait on Jonathan flipping the Screen sharing switch in the
+app (his step by design). The moment it flips, the owed proofs
+are: one `screen_shot` frame fetched + viewed, one tap, one
+stream start/stop cycle. Until then the connector keeps them
+EXTENSION-with-reason. TV profile refuses all screen ops.

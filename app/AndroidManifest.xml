@@ -20,6 +20,10 @@
          (ForegroundServiceDidNotStopInTime / StartNotAllowed loop,
          chronic since 2026-11-05). specialUse has no such budget. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- v1.25 screen sharing: the mediaProjection FGS type the
+         capture service runs under (the projection itself is still
+         gated by the system's per-session consent dialog). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -121,6 +125,22 @@
             android:turnScreenOn="true"
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- v1.25 screen sharing: the consent trampoline. Shows
+             Android's system screen-capture consent dialog and
+             hands the grant (memory only) to ScreenCaptureService.
+             Started only by our own code (MainActivity button,
+             consent notification, the screen_start command). -->
+        <activity android:name=".ScreenConsentActivity" android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- v1.25 screen sharing: MediaProjection capture engine.
+             Foreground service typed mediaProjection; runs only
+             after the consent dialog grants a session. -->
+        <service android:name=".ScreenCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
 
         <!-- Ground truth: reads the Modes and Routines app's own status
              notifications on-device (the same dump text the server-side

@@ -183,6 +183,24 @@ public final class Store {
     // (v1.12: the Health Connect channel's Store keys were removed
     // with the channel — see PushChannels.)
 
+    // Screen sharing (v1.25) — see docs/v1.25-screen-sharing-design-2026-11-13.md.
+    // The module switch is Jonathan's alone (voice-module pattern):
+    // while K_SCREEN_ENABLED is false every screen_* verb except
+    // screen_status refuses — the capability does not exist. The
+    // MediaProjection consent result itself is NEVER persisted (it
+    // lives in ScreenState's memory only, per platform rules); these
+    // keys are bookkeeping: stream belief, frame counters, last error.
+    public static final String K_SCREEN_ENABLED = "screen_enabled";   // module switch (default false)
+    public static final String K_SCREEN_STREAMING = "screen_streaming"; // stream believed live
+    public static final String K_SCREEN_STARTED_AT = "screen_started_at"; // epoch ms stream started
+    public static final String K_SCREEN_FRAMES = "screen_frames";     // cumulative frames uploaded
+    public static final String K_SCREEN_LAST_FRAME_AT = "screen_last_frame_at"; // epoch ms
+    public static final String K_SCREEN_LAST_W = "screen_last_w";     // last uploaded frame size
+    public static final String K_SCREEN_LAST_H = "screen_last_h";
+    public static final String K_SCREEN_LAST_ERROR = "screen_last_error";
+    public static final String K_SCREEN_LAST_INPUT = "screen_last_input"; // last input summary
+    public static final String K_SCREEN_LAST_INPUT_AT = "screen_last_input_at";
+
     // Tailscale guardian (v1.3.1 detection; v1.3.2 reviver)
     public static final String K_TS_DOWN_SINCE = "ts_down_since";   // epoch ms tailnet first seen down (0 = up)
     public static final String K_TS_LAST_LAUNCH = "ts_last_launch"; // epoch ms of last revive launch attempt

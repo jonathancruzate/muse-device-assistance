@@ -1,15 +1,22 @@
 package com.jonathancruzate.metamusedeviceassistance;
 
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.GestureDescription;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.Path;
+import android.hardware.HardwareBuffer;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * VoiceAccessibilityService — the accessibility half of the v1.5
@@ -1171,5 +1178,191 @@ public class VoiceAccessibilityService extends AccessibilityService {
             n = n.getParent();
         }
         return false;
+    }
+
+    // ---- Screen sharing hands (v1.25) ----
+    // The takeover + snapshot surface for the screen-sharing module
+    // (design: docs/v1.25-screen-sharing-design-2026-11-13.md),
+    // reached only through ScreenGestures from ScreenRouter / the
+    // capture service's input pump. Nothing here runs on its own:
+    // no event handler calls into this section. Coordinates are
+    // already real pixels (ScreenGestures owns the normalized ->
+    // pixel scaling). Gesture calls block the CALLING thread on the
+    // platform callback (callers are bridge / capture threads,
+    // never the main thread).
+
+    /** Dispatch one stroke and wait for the platform verdict. */
+    private boolean dispatchStrokeAndWait(Path path, long durationMs) {
+        try {
+            GestureDescription.StrokeDescription stroke =
+                    new GestureDescription.StrokeDescription(path, 0, durationMs);
+            GestureDescription gesture = new GestureDescription.Builder()
+                    .addStroke(stroke).build();
+            final CountDownLatch latch = new CountDownLatch(1);
+            final boolean[] completed = {false};
+            boolean dispatched = dispatchGesture(gesture,
+                    new GestureResultCallback() {
+                        @Override
+                        public void onCompleted(GestureDescription g) {
+                            completed[0] = true;
+                            latch.countDown();
+                        }
+
+                        @Override
+                        public void onCancelled(GestureDescription g) {
+                            latch.countDown();
+                        }
+                    }, null);
+            if (!dispatched) return false;
+            latch.await(3, TimeUnit.SECONDS);
+            return completed[0];
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** One tap at real pixels. */
+    public boolean screenTapPx(int x, int y) {
+        Path p = new Path();
+        p.moveTo(x, y);
+        return dispatchStrokeAndWait(p, 60);
+    }
+
+    /** One swipe between real pixels over durationMs. */
+    public boolean screenSwipePx(int x1, int y1, int x2, int y2, long durationMs) {
+        Path p = new Path();
+        p.moveTo(x1, y1);
+        p.lineTo(x2, y2);
+        return dispatchStrokeAndWait(p, durationMs);
+    }
+
+    /** A global action by wire name (gate-validated vocabulary). */
+    public boolean screenGlobal(String name) {
+        int action;
+        switch (name) {
+            case "back": action = GLOBAL_ACTION_BACK; break;
+            case "home": action = GLOBAL_ACTION_HOME; break;
+            case "recents": action = GLOBAL_ACTION_RECENTS; break;
+            case "notifications": action = GLOBAL_ACTION_NOTIFICATIONS; break;
+            case "quick_settings": action = GLOBAL_ACTION_QUICK_SETTINGS; break;
+            case "lock": action = GLOBAL_ACTION_LOCK_SCREEN; break;
+            default: return false;
+        }
+        try {
+            return performGlobalAction(action);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Type into the focused editable node. Null on success. */
+    public String screenTypeText(String text) {
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null) return "no_active_window";
+            AccessibilityNodeInfo target = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+            if (target == null || !target.isEditable()) {
+                target = findEditable(root);
+            }
+            if (target == null) return "no_editable_focused";
+            Bundle args = new Bundle();
+            args.putCharSequence(
+                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
+            if (target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                return null;
+            }
+            target.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+            return target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                    ? null : "set_text_refused";
+        } catch (Exception e) {
+            return "set_text_failed:" + e.getClass().getSimpleName();
+        }
+    }
+
+    /** Tap the node exactly labelled (text or description,
+     *  case-insensitive) in the active window or any window. */
+    public boolean screenFindTap(String label) {
+        AccessibilityNodeInfo root = null;
+        try { root = getRootInActiveWindow(); } catch (Exception ignored) {}
+        if (root != null) {
+            AccessibilityNodeInfo hit = findByExactLabel(root, label);
+            if (hit != null && clickNode(hit)) return true;
+        }
+        try {
+            List<AccessibilityWindowInfo> wins = getWindows();
+            if (wins != null) {
+                for (AccessibilityWindowInfo w : wins) {
+                    AccessibilityNodeInfo r = null;
+                    try { r = w.getRoot(); } catch (Exception ignored) {}
+                    if (r == null || r == root) continue;
+                    AccessibilityNodeInfo hit = findByExactLabel(r, label);
+                    if (hit != null && clickNode(hit)) return true;
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private AccessibilityNodeInfo findByExactLabel(AccessibilityNodeInfo node, String label) {
+        if (node == null) return null;
+        CharSequence t = node.getText();
+        CharSequence d = node.getContentDescription();
+        if ((t != null && label.equalsIgnoreCase(t.toString()))
+                || (d != null && label.equalsIgnoreCase(d.toString()))) {
+            return node;
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo hit = findByExactLabel(node.getChild(i), label);
+            if (hit != null) return hit;
+        }
+        return null;
+    }
+
+    /**
+     * One snapshot via takeScreenshot (API 30+; the module's config
+     * declares canTakeScreenshot). Returns a software ARGB_8888
+     * bitmap the caller owns, or null on any refusal — including a
+     * FLAG_SECURE window in front, which is the platform's rule.
+     * Blocks the calling thread up to ~8 s on the callback.
+     */
+    public Bitmap screenCaptureBitmap() {
+        if (android.os.Build.VERSION.SDK_INT < 30) return null;
+        final CountDownLatch latch = new CountDownLatch(1);
+        final Bitmap[] out = {null};
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(),
+                    new TakeScreenshotCallback() {
+                        @Override
+                        public void onSuccess(ScreenshotResult result) {
+                            HardwareBuffer hb = null;
+                            try {
+                                hb = result.getHardwareBuffer();
+                                Bitmap hw = Bitmap.wrapHardwareBuffer(
+                                        hb, result.getColorSpace());
+                                if (hw != null) {
+                                    out[0] = hw.copy(Bitmap.Config.ARGB_8888, false);
+                                    hw.recycle();
+                                }
+                            } catch (Exception ignored) {
+                            } finally {
+                                if (hb != null) {
+                                    try { hb.close(); } catch (Exception ignored) {}
+                                }
+                                latch.countDown();
+                            }
+                        }
+
+                        @Override
+                        public void onFailure(int errorCode) {
+                            latch.countDown();
+                        }
+                    });
+        } catch (Exception e) {
+            return null;
+        }
+        try {
+            latch.await(8, TimeUnit.SECONDS);
+        } catch (InterruptedException ignored) {}
+        return out[0];
     }
 }

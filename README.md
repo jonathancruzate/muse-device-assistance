@@ -672,3 +672,28 @@ ALL_PASS; build guards green; versionCode 35, APK SHA-256
 family cert unchanged. Delivered via `self_update` (enqueued
 2026-11-13; lands on the phone's next fetch cycle). Design:
 `docs/v1.24-phone-files-2026-11-13.md`.
+
+## v1.25.0 (2026-11-13)
+
+Screen sharing + takeover (Jonathan's order: Muse sees the
+phone's screen and takes it over as needed). New optional module
+behind the in-app Screen sharing switch (default OFF): `screen_shot`
+(accessibility `takeScreenshot` snapshots) and a MediaProjection
+live stream (`screen_start`/`screen_stop` — system consent dialog
+every session, tapped by Jonathan; ~4 fps JPEG to the device relay,
+10-min auto-stop, fast-input pump while streaming), plus takeover
+verbs `screen_tap` / `screen_swipe` / `screen_key` / `screen_text` /
+`screen_find_tap`, all executed by the accessibility service with
+normalized 0..1000 coordinates. Relay gained `/screen/*` routes
+(frame store + raw JPEG, meta, state, validated fast-input queue,
+self-contained viewer page) and the `screen` report whitelist; the
+repo relay copies also regained the box's v1.21/v1.24 sanitizer
+blocks they had drifted from. Gate suite ALL_PASS; build guards
+green (86 classes); versionCode 36, APK 6,125,733 bytes, SHA-256
+`680bb5e7de9cd02d5880d3b9a7520f2ad0f4f201c3b7df9dfdcaf24b2e911d0e`,
+family cert unchanged. Delivered via `self_update` cmd-68e20790 and
+verified by report (stage installed, from_code 35, `shell_bridge.screen`
+present); `screen_status` live-verified. The see/control verbs await
+Jonathan's in-app enable for their first live proofs. Design:
+`docs/v1.25-screen-sharing-design-2026-11-13.md`; record:
+`docs/v1.25-screen-sharing-2026-11-13.md`.

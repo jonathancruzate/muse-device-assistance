@@ -37,6 +37,9 @@ public class MainActivity extends Activity {
     private TextView filesView;
     private android.widget.CheckBox voiceCheck;
     private boolean syncingVoiceCheck;
+    private TextView screenView;
+    private android.widget.CheckBox screenCheck;
+    private boolean syncingScreenCheck;
     private TextView pushView;
     private android.widget.CheckBox[] pushChecks;
     private boolean syncingPushCheck;
@@ -354,6 +357,67 @@ public class MainActivity extends Activity {
             LoopbackAdb.Result r = VoiceModeModule.execute(this, "voice_toggle");
             toast(r.ok ? r.stdoutTail : "Voice toggle refused: " + r.error);
             refresh();
+        }));
+
+        TextView screenLabel = new TextView(this);
+        screenLabel.setText("\nScreen sharing (v1.25)");
+        screenLabel.setTextSize(16);
+        root.addView(screenLabel);
+
+        TextView screenHint = new TextView(this);
+        screenHint.setText("Lets Muse see this phone's screen and take it over "
+                + "from chat: single screenshots, a live stream (about 4 frames/sec "
+                + "to the relay), taps, swipes, keys, and typing — all through the "
+                + "accessibility service. Optional and OFF by default. Two gates, "
+                + "both yours: (1) check the box below, (2) the accessibility "
+                + "service above must be running. Each streaming session ALSO needs "
+                + "your tap on Android's system consent dialog — no app can skip "
+                + "that. A session auto-stops after 10 minutes and shows a "
+                + "persistent notification with a Stop button while it runs. While "
+                + "the box is unchecked, every screen command is refused — the "
+                + "capability does not exist. On TV this section is inert.");
+        root.addView(screenHint);
+
+        screenCheck = new android.widget.CheckBox(this);
+        screenCheck.setText("Screen sharing module: allow Muse to see and control this screen");
+        screenCheck.setChecked(Store.getBool(this, Store.K_SCREEN_ENABLED, false));
+        if (DeviceProfile.isTv(this)) screenCheck.setEnabled(false);
+        screenCheck.setOnCheckedChangeListener((v, checked) -> {
+            if (syncingScreenCheck) return;
+            Store.put(this, Store.K_SCREEN_ENABLED, checked);
+            BridgeLog.log(this, "SCREEN", "module " + (checked ? "ENABLED" : "DISABLED") + " from UI");
+            refresh();
+        });
+        root.addView(screenCheck);
+
+        screenView = new TextView(this);
+        screenView.setTextIsSelectable(true);
+        root.addView(screenView);
+
+        root.addView(button("Start screen sharing", v -> {
+            if (!Store.getBool(this, Store.K_SCREEN_ENABLED, false)) {
+                toast("Screen sharing module is off — check the box first");
+                return;
+            }
+            ScreenConsentActivity.start(this);
+        }));
+
+        root.addView(button("Stop screen sharing", v -> {
+            LoopbackAdb.Result r = ScreenRouter.execute(this, "screen_stop",
+                    new String[0], null);
+            toast(r.ok ? "Screen sharing stopped" : "Stop: " + r.error);
+            refresh();
+        }));
+
+        root.addView(button("Take screenshot (test)", v -> {
+            new Thread(() -> {
+                LoopbackAdb.Result r = ScreenRouter.execute(this, "screen_shot",
+                        new String[0], null);
+                runOnUiThread(() -> {
+                    toast(r.ok ? r.stdoutTail : "Screenshot refused: " + r.error);
+                    refresh();
+                });
+            }).start();
         }));
 
         TextView pushLabel = new TextView(this);
@@ -700,6 +764,15 @@ public class MainActivity extends Activity {
                     pushChecks[i].setChecked(Store.getBool(this, ch.toggleKey, ch.defaultOn));
                 }
                 syncingPushCheck = false;
+            }
+        }
+
+        if (screenView != null) {
+            screenView.setText(ScreenRouter.uiState(this));
+            if (screenCheck != null) {
+                syncingScreenCheck = true;
+                screenCheck.setChecked(Store.getBool(this, Store.K_SCREEN_ENABLED, false));
+                syncingScreenCheck = false;
             }
         }
 

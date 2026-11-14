@@ -263,6 +263,65 @@ public class ShellAllowlistTest {
     expect(com.jonathancruzate.metamusedeviceassistance.FilePlan.nameOk("a b.pdf"), "FilePlan name with space ok");
     expect(!com.jonathancruzate.metamusedeviceassistance.FilePlan.nameOk(".."), "FilePlan dotdot refused");
 
+    // ---- v1.25: screen_* gates ----
+    expect(ShellAllowlist.isNativeTemplate("screen_shot"), "screen_shot is native template");
+    expect(ShellAllowlist.isNativeTemplate("screen_find_tap"), "screen_find_tap is native template");
+    expect(!ShellAllowlist.isNativeTemplate("screen_record"), "screen_record is NOT a template");
+    expect(ShellAllowlist.checkNative("screen_status", List.of()).allowed, "screen_status no args");
+    expect(!ShellAllowlist.checkNative("screen_status", List.of("x")).allowed, "screen_status arg refused");
+    expect(ShellAllowlist.checkNative("screen_shot", List.of()).allowed, "screen_shot no args");
+    expect(ShellAllowlist.checkNative("screen_start", List.of()).allowed, "screen_start no args");
+    expect(ShellAllowlist.checkNative("screen_stop", List.of()).allowed, "screen_stop no args");
+    expect(!ShellAllowlist.checkNative("screen_shot", List.of("now")).allowed, "screen_shot arg refused");
+
+    ShellAllowlist.NativeGate tap = ShellAllowlist.checkNative("screen_tap", List.of("500", "250"));
+    expect(tap.allowed && tap.args != null && tap.args.length == 2
+            && "500".equals(tap.args[0]) && "250".equals(tap.args[1]), "screen_tap coords");
+    expect(ShellAllowlist.checkNative("screen_tap", List.of("0", "1000")).allowed, "screen_tap corners ok");
+    expect(!ShellAllowlist.checkNative("screen_tap", List.of("1001", "0")).allowed, "screen_tap >1000 refused");
+    expect(!ShellAllowlist.checkNative("screen_tap", List.of("-1", "0")).allowed, "screen_tap negative refused");
+    expect(!ShellAllowlist.checkNative("screen_tap", List.of("50.5", "0")).allowed, "screen_tap decimal refused");
+    expect(!ShellAllowlist.checkNative("screen_tap", List.of("500")).allowed, "screen_tap one arg refused");
+    expect(!ShellAllowlist.checkNative("screen_tap", List.of("500", "250", "9")).allowed, "screen_tap extra arg refused");
+
+    ShellAllowlist.NativeGate sw = ShellAllowlist.checkNative("screen_swipe",
+            List.of("500", "800", "500", "200", "300"));
+    expect(sw.allowed && sw.args != null && sw.args.length == 5 && "300".equals(sw.args[4]), "screen_swipe full");
+    expect(ShellAllowlist.checkNative("screen_swipe", List.of("0", "0", "1000", "1000", "2000")).allowed, "screen_swipe max ms ok");
+    expect(!ShellAllowlist.checkNative("screen_swipe", List.of("0", "0", "1000", "1000", "2001")).allowed, "screen_swipe ms>2000 refused");
+    expect(!ShellAllowlist.checkNative("screen_swipe", List.of("0", "0", "1000", "1000", "49")).allowed, "screen_swipe ms<50 refused");
+    expect(!ShellAllowlist.checkNative("screen_swipe", List.of("0", "0", "1000", "1000")).allowed, "screen_swipe missing ms refused");
+
+    expect(ShellAllowlist.checkNative("screen_key", List.of("back")).allowed, "screen_key back");
+    expect(ShellAllowlist.checkNative("screen_key", List.of("quick_settings")).allowed, "screen_key quick_settings");
+    expect(ShellAllowlist.checkNative("screen_key", List.of("lock")).allowed, "screen_key lock");
+    expect(!ShellAllowlist.checkNative("screen_key", List.of("power")).allowed, "screen_key power refused");
+    expect(!ShellAllowlist.checkNative("screen_key", List.of("BACK")).allowed, "screen_key case refused");
+    expect(!ShellAllowlist.checkNative("screen_key", List.of()).allowed, "screen_key no arg refused");
+
+    ShellAllowlist.NativeGate txt = ShellAllowlist.checkNative("screen_text",
+            Arrays.asList("hello", "there", "world"));
+    expect(txt.allowed && "hello there world".equals(txt.arg), "screen_text words joined");
+    expect(ShellAllowlist.checkNative("screen_text",
+            List.of("it's", "5:30!")).allowed, "screen_text punctuation ok");
+    expect(!ShellAllowlist.checkNative("screen_text", List.of()).allowed, "screen_text empty refused");
+    char[] bigChars = new char[257];
+    java.util.Arrays.fill(bigChars, 'a');
+    expect(!ShellAllowlist.checkNative("screen_text",
+            List.of(new String(bigChars))).allowed, "screen_text arg over 256 refused");
+    List<String> manyWords = new java.util.ArrayList<>();
+    for (int i = 0; i < 30; i++) {
+      StringBuilder w = new StringBuilder();
+      for (int j = 0; j < 40; j++) w.append('b');
+      manyWords.add(w.toString());
+    }
+    expect(!ShellAllowlist.checkNative("screen_text", manyWords).allowed, "screen_text joined over 1000 refused");
+
+    ShellAllowlist.NativeGate find = ShellAllowlist.checkNative("screen_find_tap",
+            Arrays.asList("Add", "to", "cart"));
+    expect(find.allowed && "Add to cart".equals(find.arg), "screen_find_tap label joined");
+    expect(!ShellAllowlist.checkNative("screen_find_tap", List.of()).allowed, "screen_find_tap empty refused");
+
     System.out.println(fails==0?"ALL_PASS":"FAILURES:"+fails);
   }
 }
