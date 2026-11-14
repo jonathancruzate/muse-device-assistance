@@ -1081,6 +1081,43 @@ long-press or the widget.
   * The two-command decomposition (voice_mode on → wait →
     voice_bridge) remains the manual fallback when the combined
     fire itself is the thing under test.
+- **Departure-escalation driver — the calendar ladder escalates
+  to a `voice_call` (first live use 2026-11-14, HYUN dinner;
+  Jonathan's order the same day: "make sure that whole workflow
+  … is captured in our device Assistance skill"):** the driver
+  behind a wake-up call is the calendar-event-stream departure
+  ladder, not a standalone decision. The ladder runs in chat
+  first (Stage 1 at leave-by −30 min, Stage 2 at leave-by
+  −5 min, then the post-departure +5/+15/+30 escalations). Main
+  escalates from chat nudges to ONE `voice_call` when ALL of
+  these hold: (1) the chat rungs are exhausted with **no
+  confirmed departure** — location still reads home and he has
+  not replied; (2) the event is **high-stakes** — a reservation
+  with a late-cancel fee, another person waiting on him, a hard
+  start time; the stream's SPEAK-TO-FIRE line on the Stage 2
+  rung is the signal main adjudicates; (3) **no never-speak
+  gate holds** — the gates are Night mode, inside a Sleep
+  block, and at work. An unplanned nap outside any Sleep block
+  with the house in Home mode is NOT a gate: that is exactly
+  the case this escalation exists for. Lower-stakes rungs stay
+  chat-only — the same afternoon, the CVS pickup ladder
+  exhausted every chat rung and main did NOT fire voice (a
+  deferrable errand; the prescription was held for days), and
+  main said so in the final nudge instead. Execution, as run
+  2026-11-14: Stage 1 (15:20) and Stage 2 (15:45) delivered in
+  chat, no reply, location home at 15:46; pre-flight
+  `media_volume_get` read **1 of 15** → `media_volume_set 10`
+  → read-back verified 10; payload protocol v2
+  (`~/workspace/voice_context.md` + the payload posted to the
+  main chat before firing); single `enqueue voice_call`
+  (cmd-43c58bf2, 15:53 EST). The session connected, he woke,
+  asked his question in-call ("Do I have time to shower
+  quick?"), took the concrete answer (shower costs the 4:10
+  train; the 4:22 lands him ~10 min late), chose it, and left —
+  departure saved, dinner not missed. **Payload shape for a
+  departure:** the current time, leave-now, and the ONE routing
+  fact that decides it (the specific train and what missing it
+  costs in arrival time) — one decision, not a briefing.
 - **Confirming a session actually started (chat-side evidence):**
   the Worker command result distinguishes "voice_mode=on
   dispatched" (fresh launch) from "voice_mode=on (already active,
@@ -1932,3 +1969,96 @@ app (his step by design). The moment it flips, the owed proofs
 are: one `screen_shot` frame fetched + viewed, one tap, one
 stream start/stop cycle. Until then the connector keeps them
 EXTENSION-with-reason. TV profile refuses all screen ops.
+
+## v1.26.0 — Duo companion: Surface Duo wake ritual (built 2026-11-14; NOT installed anywhere yet)
+
+Jonathan's order (2026-11-14): the Duo wake ritual ships as an
+APP feature, not a ROM fork (the `jonathancruzate/duo-de-muse`
+fork stays as fallback). Design + build record:
+`docs/v1.26-duo-companion-2026-11-14.md`.
+
+**Third runtime profile — Duo.** `DeviceProfile.isDuo()` keys on
+the Duo's build identity (`Build.DEVICE`/`PRODUCT` containing
+`surfaceduo`, or MODEL containing "surface duo"); it cannot
+trigger on the S24+ or the Shield, and every Duo behavior sits
+behind it. Wire identity `device="duo-bridge"`, `profile="duo"`
+(the shield-bridge precedent): the relay keeps the Duo's report
+at `duobridge:report` and its commands in the `duobridge:*`
+queue — fully separate from the phone's `phonebridge:*`.
+
+**Profile gates (TV pattern).** OFF on Duo: Samsung mode ground
+truth / reconciler (verdict always "unknown", never an ack),
+house-mode desired fetch (hence no transport directives — the
+Duo's relay base is only what Jonathan typed in setup), push
+channels, wear routing, Launcher Pack local channel. ON for Duo
+(unlike TV): the loopback shell bridge, the voice module, and
+screen sharing. BridgeService auto-starts at boot + app open
+(station precedent); the Duo section of MainActivity renders
+only under `isDuo()`.
+
+**The ritual (`DuoRitual`).** A dynamic `ACTION_USER_PRESENT`
+receiver in BridgeService posts to the ritual's own thread. One
+evaluation: ritual switch (`duo_ritual_enabled`, Jonathan's,
+default OFF) → 2-min debounce + in-flight latch → voice gates
+(closed gate = quiet skip, logged + reported, never a half-fire)
+→ already-live session skips → posture gate → panels prop
+ensured → voice fire. Every outcome string lands in the
+report's `duo` object (`last_result`, `fires`, `last_fire_at`,
+`panels_prop`, `posture_source`) — skips are observable.
+
+**Posture (`DuoPosture`) — framework only, on purpose.** The
+build's dex guard bans androidx in app code, so Jetpack
+WindowManager / the surface-duo-sdk `screenmanager-wm` route is
+reference-only. Signals: (1) hinge angle sensor
+(`Sensor.TYPE_HINGE_ANGLE`, ≥160° = open flat), (2) display
+geometry (both panels lit ⇒ ~2700 px long side), (3) neither ⇒
+USER_PRESENT alone (ratified fallback). A positive "not flat"
+skips; no signal never blocks. **UNVERIFIED on the GSI:** hinge
+HAL exposure + window-metrics semantics under the two-panel
+policy — calibrate from `posture_source` in the first real
+reports, don't assume.
+
+**Panels prop — two new FIXED shell templates** (zero args;
+property + value are compile-time constants): `duo_panels_on`
+(`setprop persist.debug.phh.duo.panels true`), `duo_panels_get`
+(read-back). Usable by the ritual on-device and by Muse via
+`phone-bridge-cmd.sh enqueue --device duo-bridge duo_panels_on`.
+Gate suite extended — ALL_PASS.
+
+**Voice fire (`VoiceBridge.executeDuoRitual`).** The combined
+`voice_call` mechanics with two Duo differences: the typed text
+is the payload itself — `DUO_OPEN_PAYLOAD` ("Jonathan just
+opened his Surface Duo — Duo wake ritual. Speak first."; the
+v1.14 prime pattern, since protocol-v2 staging is a chat-side
+act and the ritual is device-originated) — and there is NO
+float-back: `VoiceState.duoRitualFire` makes the accessibility
+service suppress the PiP return, so Muse stays full-panel.
+The v1.16/v1.17 CONNECTED hold applies unchanged. Phone
+`voice_call` behavior is untouched.
+
+**Relay.** All three repo copies (`relay/`, `relay-vm/`,
+`vm-endpoint/`) gained the duobridge identity: `cmdPrefix`,
+report key + GET, `findCmd`, `duo_pending` in the status
+listing, and the `duo` report-object whitelist. Smoke-tested
+end-to-end on a scratch instance (queue isolation from the
+phone proven). **DEPLOY ORDER MATTERS:** the deployed box/VM
+relays still run the old code, under which a `duo-bridge`
+report would fall through to `phonebridge:report` and OVERWRITE
+the phone's report — update the relay files + restart BEFORE
+configuring the Duo's Worker settings. The screen fast lane
+stays single-tenant (phone); the Duo uses the bridge lane for
+`screen.*`.
+
+**Build record:** versionCode 37 / 1.26.0; guards green (91 app
+classes); APK `app/Muse-Device-Assistance-1.26.0.apk`,
+6,133,925 bytes, SHA-256
+`e376c39970a3bb62cb43f742c76e837797019d5919a331d90f69b6d90406399d`,
+family cert unchanged. **NOT deployed** — the phone stays on
+v1.25.0; no `self_update` fired. Duo install + Jonathan's
+on-device steps (relay base/secret, loopback pairing + self-test,
+voice + accessibility gates, screen switch, ritual switch, Muse
+sign-in) are listed in the record doc, in order. Nothing about
+the Duo is live-verified yet: first proofs owed are a duobridge
+report on the updated relay, a `duo_panels_get` round-trip, one
+test-fire outcome string, and one real open-flat-unlock greeting
+with its `posture_source` read-back.
