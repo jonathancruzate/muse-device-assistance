@@ -322,6 +322,196 @@ public class ShellAllowlistTest {
     expect(find.allowed && "Add to cart".equals(find.arg), "screen_find_tap label joined");
     expect(!ShellAllowlist.checkNative("screen_find_tap", List.of()).allowed, "screen_find_tap empty refused");
 
+    // ---- v1.26 Duo companion templates ----
+    ShellAllowlist.Gate dpOn = ShellAllowlist.check("duo_panels_on", List.of());
+    expect(dpOn.allowed && "setprop persist.debug.phh.duo.panels true".equals(ShellAllowlist.describe(dpOn)), "duo_panels_on argv");
+    ShellAllowlist.Gate dpGet = ShellAllowlist.check("duo_panels_get", List.of());
+    expect(dpGet.allowed && "getprop persist.debug.phh.duo.panels".equals(ShellAllowlist.describe(dpGet)), "duo_panels_get argv");
+    expect(!ShellAllowlist.check("duo_panels_on", List.of("false")).allowed, "duo_panels_on arg refused (fixed template)");
+    expect(!ShellAllowlist.check("duo_panels_get", List.of("ro.build.id")).allowed, "duo_panels_get arg refused (no property smuggling)");
+
+    // ---- v1.29 Duo debug mode templates ----
+    // Native (on-device) fixed ops, same discipline as the panels
+    // pair: the template name is the whole instruction, zero args,
+    // and they have NO shell form at all.
+    expect(ShellAllowlist.isNativeTemplate("duo_debug_on"), "duo_debug_on is native (v1.29)");
+    expect(ShellAllowlist.isNativeTemplate("duo_debug_off"), "duo_debug_off is native (v1.29)");
+    expect(ShellAllowlist.isNativeTemplate("duo_debug_get"), "duo_debug_get is native (v1.29)");
+    ShellAllowlist.NativeGate ddOn = ShellAllowlist.checkNative("duo_debug_on", List.of());
+    expect(ddOn.allowed && "duo_debug_on".equals(ddOn.op), "duo_debug_on gate");
+    ShellAllowlist.NativeGate ddOff = ShellAllowlist.checkNative("duo_debug_off", List.of());
+    expect(ddOff.allowed && "duo_debug_off".equals(ddOff.op), "duo_debug_off gate");
+    ShellAllowlist.NativeGate ddGet = ShellAllowlist.checkNative("duo_debug_get", List.of());
+    expect(ddGet.allowed && "duo_debug_get".equals(ddGet.op), "duo_debug_get gate");
+    expect(!ShellAllowlist.checkNative("duo_debug_on", List.of("true")).allowed, "duo_debug_on arg refused (fixed template)");
+    expect(!ShellAllowlist.checkNative("duo_debug_off", List.of("now")).allowed, "duo_debug_off arg refused (fixed template)");
+    expect(!ShellAllowlist.checkNative("duo_debug_get", List.of("duo_debug")).allowed, "duo_debug_get arg refused (no key smuggling)");
+    expect(!ShellAllowlist.check("duo_debug_on", List.of()).allowed, "duo_debug_on has no shell form");
+    expect(!ShellAllowlist.check("duo_debug_get", List.of()).allowed, "duo_debug_get has no shell form");
+
+    // ---- v1.27 nativized intent-shaped templates ----
+    // The templates are native now (isNativeTemplate routes them),
+    // gated by checkNative with the SAME validators as the shell
+    // forms — which remain in check() as the BAL fallback.
+    expect(ShellAllowlist.isNativeTemplate("app_launch"), "app_launch is native (v1.27)");
+    expect(ShellAllowlist.isNativeTemplate("nav_open"), "nav_open is native (v1.27)");
+    expect(ShellAllowlist.isNativeTemplate("media_play_pause"), "media_play_pause is native (v1.27)");
+    expect(ShellAllowlist.isNativeTemplate("media_volume"), "media_volume is native (v1.27)");
+    expect(ShellAllowlist.isNativeTemplate("media_volume_set"), "media_volume_set is native (v1.27)");
+    expect(ShellAllowlist.isNativeTemplate("media_volume_get"), "media_volume_get is native (v1.27)");
+    expect(ShellAllowlist.isNativeTemplate("screen_foreground"), "screen_foreground is native (v1.27)");
+    expect(ShellAllowlist.isNativeTemplate("dnd_on"), "dnd_on native-first v1.27 (grant-gated at runtime)");
+    expect(!ShellAllowlist.isNativeTemplate("battery"), "battery stays shell (diagnostics)");
+
+    ShellAllowlist.NativeGate nApp = ShellAllowlist.checkNative("app_launch",
+            List.of("com.google.android.apps.maps"));
+    expect(nApp.allowed && "app_launch".equals(nApp.op)
+            && "com.google.android.apps.maps".equals(nApp.arg), "native app_launch gate");
+    expect(!ShellAllowlist.checkNative("app_launch", List.of("maps")).allowed, "native app_launch non-pkg refused");
+    expect(!ShellAllowlist.checkNative("app_launch", List.of("com.x; rm -rf /")).allowed, "native app_launch injection refused");
+    expect(!ShellAllowlist.checkNative("app_launch", List.of()).allowed, "native app_launch no-arg refused");
+
+    ShellAllowlist.NativeGate nNav = ShellAllowlist.checkNative("nav_open", List.of("Astoria,Queens"));
+    expect(nNav.allowed && "nav_open".equals(nNav.op)
+            && "Astoria,Queens".equals(nNav.arg), "native nav_open gate");
+    expect(!ShellAllowlist.checkNative("nav_open", List.of("New York")).allowed, "native nav_open space refused");
+    expect(!ShellAllowlist.checkNative("nav_open", List.of("A&B")).allowed, "native nav_open amp refused");
+    expect(!ShellAllowlist.checkNative("nav_open", List.of()).allowed, "native nav_open no-arg refused");
+
+    expect(ShellAllowlist.checkNative("media_play_pause", List.of()).allowed, "native media_play_pause allowed");
+    expect(!ShellAllowlist.checkNative("media_play_pause", List.of("x")).allowed, "native media_play_pause arg refused");
+    expect("media_vol_raise".equals(ShellAllowlist.checkNative("media_volume", List.of("raise")).op), "native media_volume raise op");
+    expect("media_vol_lower".equals(ShellAllowlist.checkNative("media_volume", List.of("lower")).op), "native media_volume lower op");
+    expect(!ShellAllowlist.checkNative("media_volume", List.of("up")).allowed, "native media_volume bad dir refused");
+    ShellAllowlist.NativeGate nVolSet = ShellAllowlist.checkNative("media_volume_set", List.of("7"));
+    expect(nVolSet.allowed && "media_vol_set".equals(nVolSet.op) && "7".equals(nVolSet.arg), "native media_volume_set gate");
+    expect(!ShellAllowlist.checkNative("media_volume_set", List.of("16")).allowed, "native media_volume_set 16 refused");
+    expect(ShellAllowlist.checkNative("media_volume_get", List.of()).allowed, "native media_volume_get allowed");
+    expect(ShellAllowlist.checkNative("screen_foreground", List.of()).allowed, "native screen_foreground allowed");
+    expect(!ShellAllowlist.checkNative("screen_foreground", List.of("x")).allowed, "native screen_foreground arg refused");
+    // v1.27 dnd: native-first (NotificationManager); the shell
+    // form stays as the policy-access fallback.
+    expect(ShellAllowlist.isNativeTemplate("dnd_on"), "dnd_on is native template");
+    expect(ShellAllowlist.isNativeTemplate("dnd_off"), "dnd_off is native template");
+    expect(ShellAllowlist.isNativeTemplate("nav_open"), "nav_open is native template");
+    expect(ShellAllowlist.isNativeTemplate("app_launch"), "app_launch is native template");
+    ShellAllowlist.NativeGate nDndOn = ShellAllowlist.checkNative("dnd_on", List.of());
+    expect(nDndOn.allowed && "dnd_on".equals(nDndOn.op), "native dnd_on gate");
+    ShellAllowlist.NativeGate nDndOff = ShellAllowlist.checkNative("dnd_off", List.of());
+    expect(nDndOff.allowed && "dnd_off".equals(nDndOff.op), "native dnd_off gate");
+    expect(!ShellAllowlist.checkNative("dnd_on", List.of("x")).allowed, "native dnd_on arg refused");
+    expect(!ShellAllowlist.checkNative("dnd_off", List.of("x")).allowed, "native dnd_off arg refused");
+    // The shell fallbacks still gate exactly as before.
+    expect(ShellAllowlist.check("app_launch", List.of("com.google.android.apps.maps")).allowed, "shell fallback app_launch still gated");
+    expect(ShellAllowlist.check("nav_open", List.of("Astoria")).allowed, "shell fallback nav_open still gated");
+    expect(ShellAllowlist.check("screen_foreground", List.of()).allowed, "shell fallback screen_foreground still gated");
+
+    // ---- v1.28: link_open (dedicated validator, chunked URL) ----
+    // Slots are chunks of ONE https meeting URL, reassembled by
+    // concatenation (the relay slices each arg at 256 chars, so a
+    // >256-char URL must arrive split). The URL never becomes
+    // shell text; the gate re-implements hygiene per chunk plus
+    // the meeting-host allowlist.
+    expect(ShellAllowlist.isNativeTemplate("link_open"), "link_open is native template");
+    String zoomUrl = "https://zoom.us/j/91561286454?pwd=d444bk2267E66lq8lTHaG4Yabw1tvq.1";
+    ShellAllowlist.NativeGate lZoom = ShellAllowlist.checkNative("link_open", List.of(zoomUrl));
+    expect(lZoom.allowed && "link_open".equals(lZoom.op) && zoomUrl.equals(lZoom.arg),
+            "link_open zoom proof url allowed (op+arg)");
+    expect(ShellAllowlist.checkNative("link_open",
+            List.of("https://us02web.zoom.us/j/123456789?pwd=abc")).allowed,
+            "link_open zoom subdomain allowed");
+    expect(ShellAllowlist.checkNative("link_open",
+            List.of("https://meet.google.com/abc-defg-hij")).allowed,
+            "link_open meet allowed");
+    expect(ShellAllowlist.checkNative("link_open",
+            List.of("https://teams.microsoft.com/l/meetup-join/19%3ameeting")).allowed,
+            "link_open teams microsoft allowed");
+    expect(ShellAllowlist.checkNative("link_open",
+            List.of("https://teams.live.com/l/invite/abc")).allowed,
+            "link_open teams live allowed");
+    expect(ShellAllowlist.checkNative("link_open",
+            List.of("https://acme.webex.com/meet/jonathan")).allowed,
+            "link_open webex subdomain allowed");
+    expect(ShellAllowlist.checkNative("link_open",
+            List.of("https://secure.gethealthie.com/appointments")).allowed,
+            "link_open secure healthie allowed");
+    expect(ShellAllowlist.checkNative("link_open",
+            List.of("https://gethealthie.com/")).allowed,
+            "link_open healthie root allowed");
+    expect(ShellAllowlist.checkNative("link_open",
+            List.of("https://clinic.doxy.me/room")).allowed,
+            "link_open doxy subdomain allowed");
+    expect(ShellAllowlist.checkNative("link_open",
+            List.of("https://member.teladoc.com/visit")).allowed,
+            "link_open teladoc subdomain allowed");
+    expect(ShellAllowlist.checkNative("link_open",
+            List.of("https://amwell.com/visit")).allowed,
+            "link_open amwell allowed");
+    // Chunked reassembly: split at an arbitrary point, no separator.
+    int cut = 37;
+    ShellAllowlist.NativeGate lChunk = ShellAllowlist.checkNative("link_open",
+            List.of(zoomUrl.substring(0, cut), zoomUrl.substring(cut)));
+    expect(lChunk.allowed && zoomUrl.equals(lChunk.arg), "link_open 2-chunk reassembly");
+    String longTeams = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_"
+            + "abcdefghijklmnopqrstuvwxyz0123456789".repeat(4);
+    ShellAllowlist.NativeGate lChunk3 = ShellAllowlist.checkNative("link_open",
+            List.of(longTeams.substring(0, 80), longTeams.substring(80, 160),
+                    longTeams.substring(160)));
+    expect(lChunk3.allowed && longTeams.equals(lChunk3.arg), "link_open 3-chunk reassembly");
+    // Refusals.
+    expect(!ShellAllowlist.checkNative("link_open", List.of()).allowed,
+            "link_open no args refused");
+    expect(!ShellAllowlist.checkNative("link_open",
+            List.of("https://zoom.us/", "a", "b", "c")).allowed,
+            "link_open 4 chunks refused");
+    expect(!ShellAllowlist.checkNative("link_open",
+            List.of("http://zoom.us/j/123")).allowed,
+            "link_open http refused");
+    expect(!ShellAllowlist.checkNative("link_open",
+            List.of("javascript://zoom.us/%0aalert(1)")).allowed,
+            "link_open non-https scheme refused");
+    expect(!ShellAllowlist.checkNative("link_open",
+            List.of("https://example.com/j/123")).allowed,
+            "link_open off-allowlist host refused");
+    expect(!ShellAllowlist.checkNative("link_open",
+            List.of("https://zoom.us.evil.com/j/123")).allowed,
+            "link_open lookalike suffix host refused");
+    expect(!ShellAllowlist.checkNative("link_open",
+            List.of("https://evilzoom.us/j/123")).allowed,
+            "link_open lookalike prefix host refused");
+    expect(!ShellAllowlist.checkNative("link_open",
+            List.of("https://google.com/")).allowed,
+            "link_open bare google refused (meet subdomain only)");
+    expect(!ShellAllowlist.checkNative("link_open",
+            List.of("https://user@zoom.us/j/123")).allowed,
+            "link_open userinfo refused");
+    expect(!ShellAllowlist.checkNative("link_open",
+            List.of("https://user:pass@meet.google.com/abc")).allowed,
+            "link_open userinfo+password refused");
+    expect(!ShellAllowlist.checkNative("link_open",
+            List.of("https://zoom.us/j/12 3")).allowed,
+            "link_open space refused");
+    expect(!ShellAllowlist.checkNative("link_open",
+            List.of("https://zoom.us/j/123\";reboot")).allowed,
+            "link_open quote injection refused");
+    expect(!ShellAllowlist.checkNative("link_open",
+            List.of("https://zoom.us/j/123`reboot`")).allowed,
+            "link_open backtick refused");
+    expect(ShellAllowlist.checkNative("link_open",
+            List.of("https://zoom.us")).allowed,
+            "link_open bare allowlisted host allowed");
+    expect(!ShellAllowlist.checkNative("link_open",
+            List.of("https://z")).allowed,
+            "link_open too-short url refused");
+    StringBuilder over = new StringBuilder("https://zoom.us/j/");
+    while (over.length() <= 512) over.append("a");
+    expect(!ShellAllowlist.checkNative("link_open",
+            List.of(over.substring(0, 256), over.substring(256, 512),
+                    over.substring(512))).allowed,
+            "link_open over 512 total refused");
+    expect(!ShellAllowlist.check("link_open", List.of(zoomUrl)).allowed,
+            "link_open has no shell form");
+
     System.out.println(fails==0?"ALL_PASS":"FAILURES:"+fails);
   }
 }

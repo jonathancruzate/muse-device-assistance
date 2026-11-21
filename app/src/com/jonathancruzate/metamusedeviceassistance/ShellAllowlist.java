@@ -115,6 +115,14 @@ public final class ShellAllowlist {
             "dnd_on",               // cmd notification set_dnd on
             "dnd_off",              // cmd notification set_dnd off
             "screen_foreground",    // dumpsys window displays | grep -m 1 mCurrentFocus
+            // ---- v1.26 Duo companion ----
+            // DUO-DE's opt-in two-panel windowing switch. Both are
+            // FIXED zero-arg templates: the property name and value
+            // are compile-time constants, so no caller (the ritual
+            // on-device, or Muse via the duobridge queue) can ever
+            // set any other property or value through them.
+            "duo_panels_on",        // setprop persist.debug.phh.duo.panels true
+            "duo_panels_get",       // getprop persist.debug.phh.duo.panels
     };
 
     // ---- v1.5 native (on-device, NOT shell) templates -------------------
@@ -211,6 +219,67 @@ public final class ShellAllowlist {
             "screen_key",      // args: <back|home|recents|notifications|quick_settings|lock>
             "screen_text",     // args: <words...> -> type into the focused field
             "screen_find_tap", // args: <label words...> -> tap the exactly-labelled node
+            // ---- v1.27 lag fix: intent-shaped templates NATIVIZED ----
+            // (docs/lag-diagnosis-2026-11-18.md). These templates
+            // used to be shell argv (`am start ...`, `input keyevent`,
+            // `cmd media_session ...`, a 45 KB dumpsys) — every one
+            // of them hostage to the Wi-Fi-bound loopback ADB
+            // connection, which is why nav_open took 260 s to fail
+            // on cellular on 2026-11-18. They are now gated HERE and
+            // executed by NativeCommands with direct framework calls
+            // (startActivity from the accessibility-service context,
+            // AudioManager) that work on any network. The shell
+            // forms REMAIN in TEMPLATES/check() as the fallback:
+            // ShellBridge retries through the shell gate only when
+            // the native launch reports bal_blocked AND the ADB lane
+            // is ready (the at-home case). dnd_on/dnd_off are
+            // native-first too (NotificationManager), with one
+            // honest caveat: the native form needs the Notification
+            // Policy Access grant, which Jonathan has not given.
+            // Without it the native op refuses with the typed
+            // policy_access_not_granted error and ShellBridge
+            // falls back to the shell form (which needs no grant)
+            // when the ADB lane is ready; the grant state rides in
+            // the report snapshot as shell_bridge.dnd_policy_access.
+            "app_launch",        // args: <pkg> -> getLaunchIntentForPackage, verified
+            "nav_open",          // args: <dest-token> -> google.navigation: intent, verified
+            "media_play_pause",  // args: none -> media key dispatch
+            "media_next",        // args: none
+            "media_previous",    // args: none
+            "media_volume",      // args: raise|lower -> AudioManager adjust
+            "media_volume_set",  // args: 0..15 -> AudioManager set
+            "media_volume_get",  // args: none -> AudioManager read
+            "screen_foreground", // args: none -> accessibility foreground cache
+            "dnd_on",            // args: none -> NotificationManager priority filter
+            "dnd_off",           // args: none -> NotificationManager all filter
+            // ---- v1.28 virtual-appointment session start ----
+            // args: <url-chunk> [chunk...] -> NativeCommands.openLink:
+            // the chunks reassemble (concatenation, no separator)
+            // into ONE https meeting URL, which is opened with an
+            // ACTION_VIEW intent from the accessibility-service
+            // context and foreground-verified against the expected
+            // target app for the host. Chunking exists because the
+            // device relay slices every arg at 256 chars
+            // (CMD_MAX_ARGS 16, capStr 256 in the relay's enqueue
+            // handler): a single-arg URL would be silently
+            // truncated past 256 chars. Callers split the URL at
+            // 200 chars; most join links (the proof shape is a
+            // ~60-char zoom.us/j/<id>?pwd=... URL) fit in one chunk.
+            // Gated by the dedicated checkLinkOpen() validator —
+            // the URL can never satisfy shared hygiene() ('?', '&',
+            // '=' are legitimate here) and NEVER becomes shell text.
+            "link_open",
+            // ---- v1.29 Duo debug mode ----
+            // args: NONE. Fixed on-device ops on DuoRitual's debug
+            // flag (the duo_panels_on/get discipline: the template
+            // name is the whole instruction, no caller-supplied
+            // value exists to smuggle). duo_debug_on stamps the
+            // 60-minute TTL; duo_debug_get reads back the EFFECTIVE
+            // state (an expired flag reads off). Executed by
+            // NativeCommands, never as shell text.
+            "duo_debug_on",        // args: none -> set Duo debug flag
+            "duo_debug_off",       // args: none -> clear Duo debug flag
+            "duo_debug_get",       // args: none -> effective debug state
     };
 
     public static boolean isNativeTemplate(String template) {
@@ -316,6 +385,17 @@ public final class ShellAllowlist {
         if ("screen_text".equals(template) || "screen_find_tap".equals(template)) {
             return checkScreenText(template, args);
         }
+        // v1.28: link_open is gated by its OWN validator, before
+        // shared hygiene(), for the same reason as wear_install_face:
+        // its slots carry chunks of an https URL that hygiene()'s
+        // charset can never accept, and they NEVER become shell
+        // text — NativeCommands consumes the reassembled URL as a
+        // typed Uri value in an ACTION_VIEW intent. checkLinkOpen()
+        // re-implements hygiene's protections per chunk plus the
+        // meeting-host allowlist.
+        if ("link_open".equals(template)) {
+            return checkLinkOpen(args);
+        }
         String bad = hygiene(args);
         if (bad != null) return nRefuse(bad);
         switch (template) {
@@ -336,6 +416,16 @@ public final class ShellAllowlist {
             case "voice_call":
                 if (!args.isEmpty()) return nRefuse("takes no args");
                 return nAllow("voice_call");
+            // ---- v1.29 Duo debug mode (fixed, zero args) ----
+            case "duo_debug_on":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return nAllow("duo_debug_on");
+            case "duo_debug_off":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return nAllow("duo_debug_off");
+            case "duo_debug_get":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return nAllow("duo_debug_get");
             // ---- v1.5.1 Galaxy Buds plugin routing ----
             case "buds_status":
                 if (!args.isEmpty()) return nRefuse("takes no args");
@@ -407,6 +497,56 @@ public final class ShellAllowlist {
                 }
                 return new NativeGate(true, template, null, null,
                         new String[]{args.get(0)});
+            // ---- v1.27 nativized intent-shaped templates ----
+            // Same validators as the shell forms in check() — the
+            // gate discipline is unchanged; only the executor moved.
+            // Validated values ride NativeGate.arg (typed values,
+            // consumed by NativeCommands; never shell text).
+            case "app_launch":
+                if (args.size() != 1 || !ok(PKG, args.get(0))) {
+                    return nRefuse("needs <pkg>");
+                }
+                return new NativeGate(true, "app_launch", null, args.get(0));
+            case "nav_open":
+                if (args.size() != 1 || !ok(DEST_TOKEN, args.get(0))) {
+                    return nRefuse("needs <destination-token>");
+                }
+                return new NativeGate(true, "nav_open", null, args.get(0));
+            case "media_play_pause":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return nAllow("media_play_pause");
+            case "media_next":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return nAllow("media_next");
+            case "media_previous":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return nAllow("media_previous");
+            case "media_volume":
+                if (args.size() != 1 || !ok(VOL_DIR, args.get(0))) {
+                    return nRefuse("needs <raise|lower>");
+                }
+                return nAllow("raise".equals(args.get(0))
+                        ? "media_vol_raise" : "media_vol_lower");
+            case "media_volume_set": {
+                if (args.size() != 1 || !ok(VOL_SET, args.get(0))) {
+                    return nRefuse("needs <0.." + MEDIA_VOL_MAX + ">");
+                }
+                int v = Integer.parseInt(args.get(0));
+                if (v < 0 || v > MEDIA_VOL_MAX) return nRefuse("volume out of range");
+                return new NativeGate(true, "media_vol_set", null, args.get(0));
+            }
+            case "media_volume_get":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return nAllow("media_vol_get");
+            case "screen_foreground":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return nAllow("screen_foreground");
+            case "dnd_on":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return nAllow("dnd_on");
+            case "dnd_off":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return nAllow("dnd_off");
             default:
                 return nRefuse("unknown native template");
         }
@@ -581,6 +721,99 @@ public final class ShellAllowlist {
                 new String[]{url, sha});
     }
 
+    // ---- v1.28 link_open: the meeting-host allowlist ---------------
+    // THE one place the meeting hosts live. A host qualifies when it
+    // equals a listed domain or is a subdomain of one marked
+    // (subdomains: yes). Deliberately narrow: this verb exists to
+    // start Jonathan's virtual appointments (telehealth + work
+    // meetings), not to open arbitrary links — any other host is a
+    // typed refusal, never a fallback open.
+    //   zoom.us              (subdomains: yes — us02web.zoom.us etc.)
+    //   meet.google.com      (exact)
+    //   teams.microsoft.com  (exact)
+    //   teams.live.com       (exact)
+    //   webex.com            (subdomains: yes — <org>.webex.com)
+    //   gethealthie.com      (subdomains: yes — secure.gethealthie.com)
+    //   doxy.me              (subdomains: yes — <clinic>.doxy.me)
+    //   teladoc.com          (subdomains: yes — member.teladoc.com)
+    //   amwell.com           (subdomains: yes)
+    private static boolean hostIs(String host, String domain) {
+        return host.equals(domain) || host.endsWith("." + domain);
+    }
+
+    static boolean meetingHostOk(String host) {
+        if (host == null || host.isEmpty()) return false;
+        String h = host.toLowerCase(java.util.Locale.US);
+        return hostIs(h, "zoom.us")
+                || h.equals("meet.google.com")
+                || h.equals("teams.microsoft.com")
+                || h.equals("teams.live.com")
+                || hostIs(h, "webex.com")
+                || hostIs(h, "gethealthie.com")
+                || hostIs(h, "doxy.me")
+                || hostIs(h, "teladoc.com")
+                || hostIs(h, "amwell.com");
+    }
+
+    /** Max reassembled URL length for link_open. */
+    static final int LINK_URL_MAX = 512;
+    /** Max chunks: 3 x the relay's 256-char arg slice covers the
+     *  512-char cap with room; more chunks is a caller bug. */
+    static final int LINK_MAX_CHUNKS = 3;
+
+    /**
+     * The link_open gate (v1.28): 1..3 URL chunks, reassembled by
+     * plain concatenation into the one URL NativeCommands opens.
+     * Per-chunk rules (the relay already slices each arg at 256
+     * chars, but the gate does not trust the transport): 1..256
+     * chars, no whitespace, no control characters, no quote /
+     * backtick / backslash / angle characters. Whole-URL rules:
+     * total 10..512 chars; parses as a URI; scheme https ONLY;
+     * host present and on the meeting allowlist above; NO userinfo
+     * (a userinfo segment is how a lookalike host hides). The
+     * reassembled URL rides NativeGate.arg as a typed value.
+     */
+    private static NativeGate checkLinkOpen(List<String> args) {
+        if (args.size() < 1 || args.size() > LINK_MAX_CHUNKS) {
+            return nRefuse("needs <url> in 1.." + LINK_MAX_CHUNKS + " chunks");
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String a : args) {
+            if (a == null || a.isEmpty() || a.length() > 256) {
+                return nRefuse("bad url chunk");
+            }
+            for (int i = 0; i < a.length(); i++) {
+                char c = a.charAt(i);
+                if (Character.isWhitespace(c) || c < 0x20 || c == 0x7F
+                        || c == '"' || c == '\'' || c == '`' || c == '\\'
+                        || c == '<' || c == '>') {
+                    return nRefuse("bad url character");
+                }
+            }
+            sb.append(a);
+            if (sb.length() > LINK_URL_MAX) return nRefuse("url too long");
+        }
+        String url = sb.toString();
+        if (url.length() < 10) return nRefuse("bad url length");
+        java.net.URI u;
+        try {
+            u = new java.net.URI(url);
+        } catch (Exception e) {
+            return nRefuse("unparseable url");
+        }
+        if (!"https".equalsIgnoreCase(u.getScheme())) {
+            return nRefuse("url must be https");
+        }
+        if (u.getHost() == null || u.getHost().isEmpty()) {
+            return nRefuse("url has no host");
+        }
+        if (u.getUserInfo() != null) return nRefuse("url userinfo refused");
+        if (!meetingHostOk(u.getHost())) {
+            return nRefuse("host not on meeting allowlist: " + u.getHost());
+        }
+        return new NativeGate(true, "link_open", null, url);
+    }
+
     /**
      * The files gate (v1.24): phone file management ops, gated per
      * slot with FilePlan's fixed vocabularies. Folder slots are
@@ -676,7 +909,7 @@ public final class ShellAllowlist {
      * tokens are already safe, and any future charset widening
      * cannot smuggle a space, '&', '=', '#', or '%' past it.
      */
-    private static String pctEncodeDest(String dest) {
+    static String pctEncodeDest(String dest) {
         StringBuilder sb = new StringBuilder(dest.length() + 8);
         for (int i = 0; i < dest.length(); i++) {
             char c = dest.charAt(i);
@@ -857,6 +1090,17 @@ public final class ShellAllowlist {
             case "dnd_off":
                 if (!args.isEmpty()) return refuse("takes no args");
                 return allow("cmd", "notification", "set_dnd", "off");
+            case "duo_panels_on":
+                // v1.26: DUO-DE two-panel windowing, ON. Fixed argv —
+                // see the TEMPLATES entry. persist.* survives reboot,
+                // so this is an ensure, not a per-boot requirement.
+                if (!args.isEmpty()) return refuse("takes no args");
+                return allow("setprop", "persist.debug.phh.duo.panels", "true");
+            case "duo_panels_get":
+                // v1.26: read-back for duo_panels_on (and for the
+                // ritual's ensure-then-verify discipline).
+                if (!args.isEmpty()) return refuse("takes no args");
+                return allow("getprop", "persist.debug.phh.duo.panels");
             case "screen_foreground":
                 // The ONE fixed-pipe template: template text is a
                 // compile-time constant, the template takes ZERO

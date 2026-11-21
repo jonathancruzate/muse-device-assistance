@@ -48,6 +48,11 @@ public final class Store {
     public static final String K_ADB_HEAL_ON = "adb_heal_on";         // self-heal armed (default true)
     public static final String K_ADB_HEAL_LAST_LOG = "adb_heal_last_log";
     public static final String K_ADB_WIFI_IP = "adb_wifi_ip";
+    // v1.27 lag fix (docs/lag-diagnosis-2026-11-18.md): ADB lane
+    // health bookkeeping for the fail-fast gate + report visibility.
+    public static final String K_ADB_DOWN = "adb_down";                 // Wi-Fi loss reaped the lane (NetworkCallback)
+    public static final String K_ADB_CONNECT_FAIL_AT = "adb_connect_fail_at"; // epoch ms of the last failed connect pass
+    public static final String K_ADB_CONNECT_OK_AT = "adb_connect_ok_at";     // epoch ms of the last successful connect
 
     // Reconciler verdict
     public static final String K_VERDICT = "verdict";         // in_sync|drift|unknown
@@ -87,6 +92,12 @@ public final class Store {
     // v1.5 extension pack — native (on-device) commands.
     public static final String K_TORCH_ON = "torch_on";       // last torch state from the CameraManager callback
     public static final String K_TORCH_AT = "torch_at";       // epoch ms of the last torch callback / set
+    // v1.27: foreground cache — the accessibility service records
+    // the last non-self foreground package on window-state changes,
+    // so the native screen_foreground op is an O(1) read instead of
+    // a ~45 KB dumpsys over the shell bridge.
+    public static final String K_FG_PACKAGE = "fg_package";
+    public static final String K_FG_AT = "fg_at";
     // Voice-mode self-activation module (v1.5) — OPTIONAL, OFF by
     // default; Jonathan enables it in-app. While K_VOICE_ENABLED is
     // false the voice_mode Worker verb is refused: the capability
@@ -200,6 +211,28 @@ public final class Store {
     public static final String K_SCREEN_LAST_ERROR = "screen_last_error";
     public static final String K_SCREEN_LAST_INPUT = "screen_last_input"; // last input summary
     public static final String K_SCREEN_LAST_INPUT_AT = "screen_last_input_at";
+
+    // Duo companion (v1.26) — DuoRitual bookkeeping, carried in the
+    // report's duo object (state only). K_DUO_RITUAL_ENABLED is the
+    // ritual master switch — Jonathan's alone (voice-module
+    // pattern): default OFF, and while it is off the ritual does
+    // not exist; the Duo profile still reports and serves commands.
+    public static final String K_DUO_RITUAL_ENABLED = "duo_ritual_enabled"; // default false
+    public static final String K_DUO_LAST_FIRE_AT = "duo_last_fire_at";     // epoch ms of last dispatched fire
+    public static final String K_DUO_LAST_AT = "duo_last_at";               // epoch ms of last ritual evaluation
+    public static final String K_DUO_LAST_RESULT = "duo_last_result";       // last evaluation outcome (short string)
+    public static final String K_DUO_FIRES = "duo_fires";                   // cumulative dispatched fires
+    public static final String K_DUO_POSTURE_SOURCE = "duo_posture_source"; // hinge|geometry|none
+    public static final String K_DUO_PANELS_PROP = "duo_panels_prop";       // on|off|unknown (last read-back)
+    // Duo debug mode (v1.29) — while effectively ON, the ritual
+    // evaluates but suppresses the voice fire (outcome
+    // "debug_suppressed"). Set via the duo_debug_on bridge template
+    // or the MainActivity Duo toggle. Auto-expires 60 minutes after
+    // K_DUO_DEBUG_SET_AT and is cleared at BridgeService start, so
+    // it can never survive a boot or strand the greeting off.
+    public static final String K_DUO_DEBUG = "duo_debug";                   // debug flag (default false)
+    public static final String K_DUO_DEBUG_SET_AT = "duo_debug_set_at";     // epoch ms the flag was set (TTL authority)
+    public static final String K_DUO_DEBUG_SUPPRESSIONS = "duo_debug_suppressions"; // cumulative suppressed evaluations
 
     // Tailscale guardian (v1.3.1 detection; v1.3.2 reviver)
     public static final String K_TS_DOWN_SINCE = "ts_down_since";   // epoch ms tailnet first seen down (0 = up)

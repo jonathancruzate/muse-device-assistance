@@ -38,6 +38,45 @@ public class BridgeService extends Service {
     private String lastReportedVerdict = "";
     private PushObservers pushObservers;
 
+    // v1.27: command fetch/execute lives on its OWN thread with a
+    // 7 s poll, draining until the queue is empty. Through v1.26
+    // commands rode this service's single 60 s cycle thread, one
+    // per cycle, AFTER the desired-state fetch: one slow command
+    // froze command fetches, reports, and push behind it, and a
+    // queued command could wait minutes just to be fetched
+    // (2026-11-18 incident, docs/lag-diagnosis-2026-11-18.md).
+    private HandlerThread cmdThread;
+    private Handler cmdHandler;
+    private static final long CMD_POLL_MS = 7_000;
+
+    private final Runnable cmdLoop = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                if (Store.workerConfigured(BridgeService.this)) {
+                    ShellBridge.drainCommands(BridgeService.this);
+                }
+            } catch (Exception e) {
+                BridgeLog.log(BridgeService.this, "SERVICE",
+                        "command loop error: " + e.getClass().getSimpleName()
+                                + " " + e.getMessage());
+            } finally {
+                if (cmdHandler != null) {
+                    cmdHandler.removeCallbacks(this);
+                    cmdHandler.postDelayed(this, CMD_POLL_MS);
+                }
+            }
+        }
+    };
+
+    /** Run a command drain now (the poll chain continues). */
+    private void kickCommands() {
+        if (cmdHandler != null) {
+            cmdHandler.removeCallbacks(cmdLoop);
+            cmdHandler.post(cmdLoop);
+        }
+    }
+
     public static void start(Context ctx) {
         Store.put(ctx, Store.K_SERVICE_ON, true);
         Intent i = new Intent(ctx, BridgeService.class);
@@ -96,13 +135,33 @@ public class BridgeService extends Service {
         // channel toggle inside PushObservers (no-op on TV).
         pushObservers = new PushObservers(this, handler);
         pushObservers.start();
+        // v1.26 Duo companion: the wake-ritual watcher lives only
+        // on the Duo profile (DuoRitual.start self-guards too).
+        // v1.29: a set Duo debug flag never survives a service
+        // start (boot, app open, restart) — cleared before the
+        // watcher registers.
+        if (DeviceProfile.isDuo(this)) {
+            DuoRitual.clearDebugOnStart(this);
+            DuoRitual.start(this);
+        }
         handler.post(this::cycle);
+        // v1.27: the dedicated command thread (TV keeps no command
+        // channel — ShellBridge self-guards there too).
+        if (!DeviceProfile.isTv(this)) {
+            cmdThread = new HandlerThread("bridge-commands");
+            cmdThread.start();
+            cmdHandler = new Handler(cmdThread.getLooper());
+            cmdHandler.post(cmdLoop);
+            BridgeLog.log(this, "SERVICE",
+                    "command thread started (7s poll, drain-until-empty)");
+        }
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_CYCLE.equals(intent.getAction()) && handler != null) {
             handler.post(this::cycle);
+            kickCommands();
         }
         return START_STICKY;
     }
@@ -125,7 +184,10 @@ public class BridgeService extends Service {
     @Override
     public void onDestroy() {
         BridgeLog.log(this, "SERVICE", "destroyed");
+        if (DeviceProfile.isDuo(this)) DuoRitual.stop(this);
         if (pushObservers != null) pushObservers.stop();
+        if (cmdHandler != null) cmdHandler.removeCallbacksAndMessages(null);
+        if (cmdThread != null) cmdThread.quitSafely();
         LoopbackAdb.close(this);
         if (handler != null) handler.removeCallbacksAndMessages(null);
         if (thread != null) thread.quitSafely();
@@ -142,6 +204,11 @@ public class BridgeService extends Service {
             AdbBridge.tick(this);
             TailscaleGuard.tick(this);
             boolean tv = DeviceProfile.isTv(this);
+            // v1.26: the Duo profile shares TV's phone-surface gates
+            // (no Samsung modes, no house-mode desired, no push
+            // channels) but KEEPS the shell bridge + reports, under
+            // its own duobridge identity.
+            boolean duo = DeviceProfile.isDuo(this);
             boolean configured = Store.workerConfigured(this);
             // v1.9: per-cycle transport health for the probation
             // fallback below — did this cycle's desired fetch and
@@ -150,15 +217,22 @@ public class BridgeService extends Service {
             boolean reportAttempted = false;
             boolean reportOk = false;
             if (configured && !tv) {
-                fetchOk = WorkerClient.fetchDesired(this);
-                ShellBridge.tick(this);
+                // Duo: no house-mode desired fetch (a phone surface;
+                // WorkerClient.fetchDesired self-guards too) — the
+                // transport directive rides it, so the Duo's base is
+                // whatever Jonathan entered in setup, by design.
+                if (!duo) fetchOk = WorkerClient.fetchDesired(this);
+                // v1.27: commands no longer execute here — the
+                // dedicated command thread (cmdLoop) owns fetch +
+                // execute, so a slow command can never freeze this
+                // cycle's reports or push again.
             }
             Reconciler.Verdict v = Reconciler.evaluate(this);
             // v1.6 push channels: Low Battery crossing latch + retry of
             // any queued push payloads. Both are no-ops when their
             // channel is OFF / the queue is empty, and both are gated
             // off on TV inside PushChannels/PushClient.
-            if (!tv) {
+            if (!tv && !duo) {
                 BatteryPush.check(this);
                 // v1.7: observer diffs (calendar/contacts/messages/
                 // call log; dialer pushes live from its callback).
@@ -185,7 +259,7 @@ public class BridgeService extends Service {
             // previous base once and reverts if it answers (no-op
             // outside probation or with no previous base stored;
             // WorkerClient.maybeRevertTransport owns the window).
-            if (configured && !tv && !fetchOk && reportAttempted && !reportOk) {
+            if (configured && !tv && !duo && !fetchOk && reportAttempted && !reportOk) {
                 WorkerClient.maybeRevertTransport(this);
             }
             updateNotification(v);
@@ -202,6 +276,14 @@ public class BridgeService extends Service {
             NotificationManager nmTv = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
             if (nmTv != null) nmTv.notify(1, statusNotification(
                     "Shield TV profile - shieldbridge - observing (phone surfaces off)"));
+            return;
+        }
+        if (DeviceProfile.isDuo(this)) {
+            NotificationManager nmDuo = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nmDuo != null) nmDuo.notify(1, statusNotification(
+                    "Surface Duo profile - duobridge - ritual "
+                            + (DuoRitual.ritualEnabled(this) ? "armed" : "off")
+                            + " (phone surfaces off)"));
             return;
         }
         String mode = Reconciler.resolveObservedMode(

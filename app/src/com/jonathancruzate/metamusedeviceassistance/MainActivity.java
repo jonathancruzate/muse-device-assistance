@@ -40,6 +40,11 @@ public class MainActivity extends Activity {
     private TextView screenView;
     private android.widget.CheckBox screenCheck;
     private boolean syncingScreenCheck;
+    private TextView duoView;
+    private android.widget.CheckBox duoCheck;
+    private boolean syncingDuoCheck;
+    private android.widget.CheckBox duoDebugCheck;
+    private boolean syncingDuoDebugCheck;
     private TextView pushView;
     private android.widget.CheckBox[] pushChecks;
     private boolean syncingPushCheck;
@@ -67,6 +72,14 @@ public class MainActivity extends Activity {
 
         if (DeviceProfile.isTv(this)) {
             BridgeLog.log(this, "PROFILE", "tv profile detected: " + DeviceProfile.describe(this));
+            if (!Store.getBool(this, Store.K_SERVICE_ON, false)) {
+                BridgeService.start(this);
+            }
+        }
+        if (DeviceProfile.isDuo(this)) {
+            // v1.26: a station device comes up armed on app open,
+            // like the Shield (BootReceiver does the same at boot).
+            BridgeLog.log(this, "PROFILE", "duo profile detected: " + DeviceProfile.describe(this));
             if (!Store.getBool(this, Store.K_SERVICE_ON, false)) {
                 BridgeService.start(this);
             }
@@ -420,6 +433,69 @@ public class MainActivity extends Activity {
             }).start();
         }));
 
+        // ---- v1.26 Duo companion section: rendered ONLY on the
+        // Duo profile; the phone and Shield never see it.
+        if (DeviceProfile.isDuo(this)) {
+            TextView duoLabel = new TextView(this);
+            duoLabel.setText("\nSurface Duo companion — wake ritual (v1.26)");
+            duoLabel.setTextSize(16);
+            root.addView(duoLabel);
+
+            TextView duoHint = new TextView(this);
+            duoHint.setText("When you open the Duo flat and unlock it: the "
+                    + "two-panel windowing prop is ensured on, Muse opens in "
+                    + "its panel and a voice session starts with a spoken "
+                    + "greeting (\"Jonathan just opened his Surface Duo\"), and "
+                    + "the right panel stays free for work — Muse can drive "
+                    + "it through the Screen sharing module above. The ritual "
+                    + "rides gates that are all yours: this switch, the Voice "
+                    + "module above, the accessibility grant, and the shell "
+                    + "bridge pairing (for the panels prop). While any gate is "
+                    + "closed the ritual skips quietly — it never half-fires "
+                    + "and never talks over a live session.");
+            root.addView(duoHint);
+
+            duoCheck = new android.widget.CheckBox(this);
+            duoCheck.setText("Duo wake ritual: greet me when I open and unlock the Duo");
+            duoCheck.setChecked(Store.getBool(this, Store.K_DUO_RITUAL_ENABLED, false));
+            duoCheck.setOnCheckedChangeListener((v, checked) -> {
+                if (syncingDuoCheck) return;
+                Store.put(this, Store.K_DUO_RITUAL_ENABLED, checked);
+                BridgeLog.log(this, "DUO", "ritual " + (checked ? "ENABLED" : "DISABLED") + " from UI");
+                refresh();
+            });
+            root.addView(duoCheck);
+
+            // v1.29: debug toggle on the same Store key the bridge
+            // templates write. While on, the ritual evaluates but
+            // never fires (debug_suppressed); it auto-expires after
+            // 60 minutes and clears when the bridge service starts.
+            duoDebugCheck = new android.widget.CheckBox(this);
+            duoDebugCheck.setText("Duo debug mode: wake-ups evaluate but never greet (auto-off after 60 min)");
+            duoDebugCheck.setChecked(DuoRitual.debugActive(this));
+            duoDebugCheck.setOnCheckedChangeListener((v, checked) -> {
+                if (syncingDuoDebugCheck) return;
+                DuoRitual.setDebug(this, checked);
+                BridgeLog.log(this, "DUO", "debug " + (checked ? "ENABLED" : "DISABLED") + " from UI");
+                refresh();
+            });
+            root.addView(duoDebugCheck);
+
+            duoView = new TextView(this);
+            duoView.setTextIsSelectable(true);
+            root.addView(duoView);
+
+            root.addView(button("Test ritual now", v -> {
+                new Thread(() -> {
+                    String outcome = DuoRitual.testFire(this);
+                    runOnUiThread(() -> {
+                        toast("Ritual: " + outcome);
+                        refresh();
+                    });
+                }).start();
+            }));
+        }
+
         TextView pushLabel = new TextView(this);
         pushLabel.setText("\nPush channels — this device → Muse (you control each one)");
         pushLabel.setTextSize(16);
@@ -448,6 +524,7 @@ public class MainActivity extends Activity {
             cb.setText(ch.label);
             cb.setChecked(Store.getBool(this, ch.toggleKey, ch.defaultOn));
             if (DeviceProfile.isTv(this)) cb.setEnabled(false);
+            if (DeviceProfile.isDuo(this)) cb.setEnabled(false);
             cb.setOnCheckedChangeListener((v, checked) -> {
                 if (syncingPushCheck) return;
                 onPushToggled(ch, checked);
@@ -574,6 +651,11 @@ public class MainActivity extends Activity {
     private void onPushToggled(PushChannels.Channel ch, boolean checked) {
         if (DeviceProfile.isTv(this)) {
             toast("Push channels are gated off on TV");
+            refresh();
+            return;
+        }
+        if (DeviceProfile.isDuo(this)) {
+            toast("Push channels are gated off on the Duo profile");
             refresh();
             return;
         }
@@ -773,6 +855,20 @@ public class MainActivity extends Activity {
                 syncingScreenCheck = true;
                 screenCheck.setChecked(Store.getBool(this, Store.K_SCREEN_ENABLED, false));
                 syncingScreenCheck = false;
+            }
+        }
+
+        if (duoView != null) {
+            duoView.setText(DuoRitual.statusText(this));
+            if (duoCheck != null) {
+                syncingDuoCheck = true;
+                duoCheck.setChecked(Store.getBool(this, Store.K_DUO_RITUAL_ENABLED, false));
+                syncingDuoCheck = false;
+            }
+            if (duoDebugCheck != null) {
+                syncingDuoDebugCheck = true;
+                duoDebugCheck.setChecked(DuoRitual.debugActive(this));
+                syncingDuoDebugCheck = false;
             }
         }
 

@@ -1207,6 +1207,186 @@ long-press or the widget.
   BridgeLog for the record. Nothing else changed: speak-first,
   the bridge, and the v1.5.2 reconciler are untouched.
 
+### Wave 2 voice routing + spoken brief spec (2026-11-18)
+
+Adopted 2026-11-18 under Jonathan's "Do it all" order, from
+`docs/wave2-scoping-2026-11-09.md` section 1. This addendum is the
+routing policy the voice section above was missing: which existing
+paths try `voice_mode` first, and what a spoken brief must contain.
+The discretion grant, the SPEAK-FIRST rule, and the main-chat bridge
+procedure above still govern every session.
+
+**(a) Blocked-on-Jonathan heartbeat calls: voice-first routing.**
+When the heartbeat hits a genuine needs-Jonathan block (needs_human,
+exhausted failure, urgent user-facing item), choose the channel from
+a fresh Device Assistance report before placing any contact:
+
+- Prefer `voice_mode` when ALL hold: the latest report is 15 min old
+  or less, `screen_on` is true, the house mode is not Night, the
+  foreground is not a call app, meeting app, or camera (per the
+  context-engine channel rules in `local-proactive-intervention`),
+  and the report's `shell_bridge` shows `voice_enabled:true`.
+- Fall back to the agentring call when ANY hold: the report is stale
+  or absent, the screen is off, `voice_mode` returns refused or
+  no-op twice, the session opens but he does not engage within
+  60 seconds, or the matter needs the agentring brain's consult
+  tiers (deep memory Q&A about the blocked work; rare, because
+  `voice_mode` reaches the main chat, which has full context).
+- Invariants, unchanged: one contact attempt per dedup-key, ever,
+  across both channels. A `voice_mode` attempt consumes the one
+  attempt exactly as an agentring ring does. The heartbeat record's
+  notes carry `called:<utc>` plus `channel: voice_mode|agentring`.
+  Night mode blocks both channels, no exceptions. A missed or
+  unanswered attempt is never consent. Purely informational flags
+  never call on either channel.
+- Gate: SATISFIED by history (Jonathan's correction, 2026-11-18:
+  "we proved it works already, you used it already"). The scoping
+  doc's 3-supervised-trial gate was written 2026-11-09, before the
+  proof run happened: 2026-11-11 02:47 EST (voice_mode fired via
+  the relay, Muse spoke first, Jonathan conversed and confirmed
+  "this is working great"), the 2026-11-11 evening voice_call
+  single-fire trials with his confirmations, the 2026-11-13 session
+  where he heard Muse first on unlock, and further live fires on
+  2026-11-14, 2026-11-15, and 2026-11-16. The heartbeat worker may
+  apply this preference unsupervised; the path is proven, not
+  pending trials.
+
+**(b) Morning ramp-up spoken brief.** On mornings where the day's
+first movement is on foot or transit, meaning office days
+(Tue/Thu/Fri, in-office 10:30) and any day whose first calendar
+block is away from home, the main agent offers the ramp-up as a
+spoken brief via `voice_mode` from the main chat (no bridge needed;
+the main chat owns its own session). The spoken brief is generated
+from the same consolidated ramp-up content as the text version: one
+source, two renderings, never a separately researched brief. The
+text digest is still posted in full; the spoken brief is only its
+headline layer, never a replacement that hides detail. Desk-first
+mornings stay text-only. Gate: Jonathan's reaction on the first
+2 to 3 spoken ramp-ups decides whether the day-shape rule stands
+or narrows.
+
+**(c) Bedtime wind-down spoken brief.** During the Wind Down
+calendar block, when the phone is in hand (screen on, home mode,
+not Night yet), the bedtime ask may open as a spoken brief: Muse
+speaks the day-close summary plus the three overnight-job
+questions; his spoken answers land in the main chat natively (the
+voice session is the main chat), and the existing confirm-back
+restatement still happens before he sleeps, by voice if the session
+is live, else by text as before. The text ask remains the fallback
+and the default on nights the phone is idle. Never wake him: a
+spoken brief starts only while he is demonstrably awake and holding
+the phone, inside Wind Down, never after Sleep starts. Current
+state (2026-11-18): the `overnight-job-bedtime-ask` cron is disabled
+at Jonathan's order (2026-11-13, "Turn off this automation"), so
+this path is dormant as a cron behavior until he re-enables it; in
+the meantime the spoken wind-down brief lives only as a main-agent
+habit during Wind Down. The cron body carries one pointer line to
+this section so the spoken form is documented if it is ever
+re-enabled; its questions and limits do not change.
+
+**Shared spoken brief spec (all three paths).**
+
+1. Speak-first opener: identity plus reason in one sentence, per
+   the SPEAK-FIRST rule. No silent open session, ever.
+2. Length budget: about 90 seconds spoken at most. One headline, at
+   most three facts or decisions, one closing line. Anything longer
+   is a phone call, not a brief, and belongs on agentring or in
+   text.
+3. Structure for action path (a): what is blocked, the one thing he
+   needs to do or decide, and what happens once he does. These are
+   the same three beats the agentring skill requires of a blocked
+   call, so a brief and its fallback call carry identical content.
+4. Structure for digest paths (b/c): headline outcome first
+   (overnight job result or day shape), then needs-him items by
+   urgency, then the single next anchor (leave-by, first meeting,
+   Wind Down or Sleep times). No full enumeration: the text version
+   holds the complete list and the brief says so.
+5. Grounding: briefs render from the same consolidated source as
+   their text counterpart (heartbeat record, ramp-up digest,
+   day-close state). No facts originate in the brief; a number or
+   name not in the source does not get spoken.
+6. Close-out and logging: if he engages, the conversation is his.
+   If he does not, Muse ends the session explicitly (`voice_mode`
+   off) after the brief; never leave a session open as an ambient
+   channel. The no-engagement window is 60 seconds for path (a) and
+   end-of-brief for paths (b/c). The attempt, channel, brief text,
+   and outcome (engaged, no-engage, or refused) are logged to the
+   owning record (heartbeat failure record, daily log) in the same
+   handling.
+
+**Explicitly NOT migrated:** inbound "call Muse" (the agentring
+handset; he calls it, it does not become `voice_mode`), business
+calling (agentring is Jonathan-only by rule; business calls keep
+their own lane), and the departure copilot's spoken opener (Wave 1
+work; it consumes the brief spec above, but its routing is scoped
+there, not here).
+
+
+### Wave 2 watch namespace + weekly health read (2026-11-18)
+
+Built 2026-11-18 under Jonathan's "Do it all" order, from
+`docs/wave2-scoping-2026-11-09.md` sections 2 and 3, adapted to
+verified reality: the hand-built Muse for Wear OS app was retired
+2026-11-09 in favor of Meta's official watch app, so there is no
+on-watch plugin to build. The `watch` namespace is server-side,
+backed by Health Connect, where watch sleep and health data
+actually lands.
+
+**Watch namespace** (`~/workspace/phone-toolkit/watch_plugin.py`,
+JSON output, read verbs live-verified 2026-11-18):
+- `watch_status`: Health Connect coverage, sleep freshness
+  (morning-after cadence, about 10 h at first read), last night's
+  merged summary. No watch battery/connectivity exists in Health
+  Connect; none is claimed.
+- `watch_sleep_get [--date YYYY-MM-DD]`: merges the night's
+  fragmented sessions (window 17:00 to next-day 12:00, 300 s gap
+  tolerance, longest block is the night) into onset, wake,
+  duration, stage sums, session count, and a worn flag. The worn
+  flag is a PROXY (at least one session carries stage detail), not
+  a hardware reading; never use it alone to discard a night. Stage
+  sums can double-count overlapping source apps; onset/wake/
+  duration use the merged span.
+- `watch_health_summary`: latest complete day's resting HR, HR
+  average/max, steps. No daily HR minimum or SpO2 is observed in
+  the data; none is reported.
+- `watch_notify` / `watch_find`: typed NOT_SUPPORTED. The official
+  Muse watch app exposes no push/find API. Reviving a custom watch
+  app to gain them is Jonathan's decision; the shipped v1 is
+  read-only.
+- Bedtime feed: candidate actuals are dual-logged into the bedtime
+  goal's `actuals.jsonl` with source `watch-hc-candidate` (first
+  batch: 2026-11-11 to 2026-11-17, 7 nights). Scoring is unchanged;
+  the 2-week comparison and any switch of the primary actual
+  source belong to the bedtime goal (goal_8896372386b1), not this
+  namespace. No live asleep-to-Night actuation is wired; that is
+  an explicit non-goal, and the Health Connect cadence could not
+  support it anyway.
+Records: `docs/wave2-watch-spike-2026-11-18.md`,
+`docs/wave2-watch-namespace-2026-11-18.md`.
+
+**Weekly Device Assistance health read** (Tending section 13's
+second weekly leg, alongside the settings snapshot, Sunday-night
+run; no new cron):
+`~/workspace/phone-toolkit/da_health_read.py` reads the latest
+relay report (box device relay, freshness-gated), the latest
+phone audit, and crash tail via a singly enqueued `dropbox_print`,
+and writes `~/workspace/phone-toolkit/state/da-health-latest.json`
+(preserving the prior week as `da-health-prev.json`). It checks
+report freshness and `parse_ok`, installed vs built version (lag
+over 7 days is a defect), shell_bridge and voice consistency
+(`voice_active` persisting across two weekly reads is the desync
+finding), Tailscale and ADB self-heal deltas, and Shield mirror
+fields when a shieldbridge report exists. Surfacing: silent
+unless a defect is severity-high or repeats across two weekly
+reads; an unread crash section is recorded as `unread`, never as
+zero crashes. First live run 2026-11-18: report 390 s old,
+`parse_ok` true, shell_bridge healthy, phone on v1.25.0 vs built
+v1.26.0 (4.5 days, under threshold), surface list empty. The same
+build fixed `phone_audit.py`, which still listed the pre-rename
+package and reported the app as not installed. Record:
+`docs/wave2-health-read-2026-11-18.md`.
+
+
 ## Push channels — local push replacement (v1.6.0 contract; v1.7.0 observers LIVE, toggles Jonathan's)
 
 Jonathan's 2026-11-09 orders: replace the rest of MacroDroid
@@ -2066,3 +2246,181 @@ the Duo is live-verified yet: first proofs owed are a duobridge
 report on the updated relay, a `duo_panels_get` round-trip, one
 test-fire outcome string, and one real open-flat-unlock greeting
 with its `posture_source` read-back.
+
+## v1.27.0 — native-first execution + fail-fast ADB lane (built + deployed 2026-11-18)
+
+The P0 lag fix. Parent record: `docs/lag-diagnosis-2026-11-18.md`
+(the 260 s nav_open failure while Jonathan drove on cellular).
+Execution record: `docs/v1.27-native-first-2026-11-18.md`.
+Jonathan's governing directive: the app should be as native as
+possible — every capability that can execute natively in-app
+does; the loopback ADB shell bridge is diagnostics-only now.
+(Version note: 1.26.0/code 37 was the Duo companion build of
+2026-11-14, never installed on the phone; this build is
+1.27.0 / versionCode 38 so the number was not reused.)
+
+What an operator needs to know:
+
+- **Native templates** (gated by `ShellAllowlist.checkNative`,
+  executed by `NativeCommands`, no shell text, no ADB, work on
+  any network): `app_launch`, `nav_open` (both launch from the
+  accessibility-service context and VERIFY the foreground
+  actually changed; non-arrival is a typed `bal_blocked`, never
+  a false ok), `media_play_pause`/`media_next`/`media_previous`,
+  `media_volume`/`media_volume_set`/`media_volume_get`
+  (AudioManager), `screen_foreground` (accessibility foreground
+  cache, O(1)), `dnd_on`/`dnd_off` (NotificationManager — needs
+  the Notification Policy Access grant; without it the op
+  refuses typed `policy_access_not_granted`). `flashlight` was
+  already native.
+- **Fallback rule**: a native `bal_blocked` or
+  `policy_access_not_granted` result retries through the shell
+  form ONLY when the ADB lane is ready (at home). Off Wi-Fi the
+  typed native error is the final answer — no time is burned.
+- **Shell bridge = diagnostics only** (`battery`, `getprop_model`,
+  `settings_*`, `logcat_tail`, `dropbox_print`,
+  `deviceidle_whitelist`, `standby_*`, `role_holders`, voicemail
+  role pair, self_update's `cp`/`pm install` leg), and it now
+  FAILS FAST: typed `adb_unavailable` in <1 s when the lane is
+  provably down, ~5 s cap on off-network endpoint attempts, no
+  Wi-Fi-host attempt when `wifi_ip` is empty, NO retry pass on
+  connect failures. Worst case ~10 s (was ~260 s).
+- **Check `shell_bridge.adb_ready` in the freshest report before
+  enqueueing any shell template.** New report fields:
+  `adb_ready`, `adb_down` (Wi-Fi-loss flag; a NetworkCallback
+  reaps on loss and proactively reconnects on join),
+  `dnd_policy_access`.
+- **Commands no longer ride the 60 s cycle**: a dedicated
+  command thread polls every 7 s and drains until empty, so a
+  slow execution never blocks reports or push again. The
+  enqueue-singly rule still stands (the queue is newest-first;
+  batch enqueues strand).
+- **DND**: fully native the moment Jonathan grants Notification
+  Policy Access to the app in system settings; until then the
+  shell fallback carries it at home. Do not claim native DND
+  until a report shows `dnd_policy_access: true`.
+- **Do NOT fire a live `nav_open` as a self-test.** The
+  supervised Maps-foregrounding-during-a-call test is
+  Jonathan's, scheduled with him.
+- Deploy state at shipping (2026-11-19T00:46Z): `self_update`
+  cmd-2db935b4, phone downloaded the APK from the box serve
+  (tailnet port 8797 — 8795/8796 belong to other relay-family
+  listeners now) per the serve log; the post-install report was
+  still outstanding at record time (app silent since the
+  install window, phone up on Wi-Fi/tailnet). Verification
+  addendum lives in the execution record.
+
+## v1.28.0 — link_open: start a virtual-appointment session on the phone (built + staged 2026-11-19; NOT installed, NOT live-verified)
+
+Execution record: `docs/v1.28-link-open-2026-11-19.md`. Built for
+Jonathan's virtual-appointment auto-join system (skill
+`local-virtual-appointment-autojoin`): when he is not home, the
+appointment's join link gets opened on the phone.
+
+- **New native template `link_open`** (gated by the dedicated
+  `ShellAllowlist.checkLinkOpen`, executed by
+  `NativeCommands.openLink`; NO shell form exists): an
+  `ACTION_VIEW` intent with the join URL, issued from the
+  accessibility-service context, foreground-verified against the
+  host's expected packages (native meeting app or Chrome /
+  Samsung Internet) within ~2.5 s; non-arrival is typed
+  `bal_blocked`, accessibility-down is `bal_unverified`, never a
+  false ok.
+- **Validator**: https ONLY; host on the meeting allowlist (the
+  list lives in one place, `ShellAllowlist.meetingHostOk`:
+  `zoom.us` + subdomains, `meet.google.com`, `teams.microsoft.com`,
+  `teams.live.com`, `webex.com` + subdomains, `gethealthie.com` +
+  subdomains incl. `secure.gethealthie.com`, `doxy.me` +
+  subdomains, `teladoc.com` + subdomains, `amwell.com` +
+  subdomains); NO userinfo; no whitespace/quotes/backticks;
+  reassembled length cap 512. Lookalikes (`zoom.us.evil.com`,
+  `evilzoom.us`) refuse by construction.
+- **Arg packing (relay discipline)**: the relay slices each arg
+  at 256 chars, so the URL travels in 1..3 chunks reassembled
+  on-device by concatenation. Caller rule: split the URL at 200
+  chars; most join links fit in one chunk (the Health Loft Zoom
+  proof shape is ~66 chars). Enqueue SINGLY, as always:
+  `phone-bridge-cmd.sh enqueue link_open <chunk> [chunk...]`.
+- Gate suite **252 PASS, ALL_PASS** (31 new link_open cases).
+  APK 6,142,117 bytes, SHA-256
+  `9c2fdc53352f04ff42ed857ae741ec1451aae95c63f4597971e6044cef57d989`,
+  family cert unchanged; badging versionCode 39 / 1.28.0.
+- **Install state: STAGED, blocked on the same app-not-cycling
+  state that left v1.27.0 unverified** — the freshest relay
+  report is still 2026-11-19T00:40:50Z on v1.25.0 (code 36).
+  APK is on the box serve (tailnet :8797, sha re-verified from
+  the served bytes) and `self_update` cmd-c6169d3a is enqueued
+  singly with a 6 h TTL; it installs on the app's next cycle
+  (recovery: Jonathan opens the app once). The first fresh
+  report settles it: expect `self_update {1.28.0, code 39,
+  stage installed}`.
+- **Do NOT fire a live `link_open` while Jonathan is in an
+  appointment** (it foregrounds a meeting app on his phone).
+  The owed live proof, when he is not in one: enqueue
+  `link_open https://meet.google.com/` singly and read back
+  `foreground=com.android.chrome` (or the Meet app).
+
+## v1.29.0 — Duo debug mode (built + verified on the Duo, 2026-11-21)
+
+- **What**: a debug mode for the Duo wake ritual, ordered by
+  Jonathan ("every time the duo wakes up you start thinking I
+  called you from across the room"). While debug is ON, a wake-up
+  still runs the ritual evaluation, but the evaluation stops
+  right after the ritual-switch check with outcome
+  `debug_suppressed`: no voice session, no typed payload, no
+  panels work. A cumulative suppressions counter is kept.
+- **Store**: `duo_debug` (bool), `duo_debug_set_at` (epoch ms,
+  the TTL authority), `duo_debug_suppressions` (cumulative).
+  Effective state is computed, never trusted raw: debug counts
+  as OFF 60 minutes after it was set (TTL 3,600,000 ms), and
+  BridgeService start clears a set flag (the boot clear; the
+  same path runs on any bridge restart).
+- **Bridge templates** (FIXED, no args, native; they flip an
+  in-app Store flag, so they have no shell form):
+  `duo_debug_on`, `duo_debug_off`, `duo_debug_get`. The get
+  returns the effective state, e.g. `duo_debug=on set_at=<epoch>
+  suppressions=<n>`. Registered in `ShellAllowlist`
+  NATIVE_TEMPLATES + `checkNative`, executed in
+  `NativeCommands`. No profile gate (the flag is only read by
+  the Duo ritual; the Duo queue is the only lane that sends
+  them).
+- **MainActivity**: Duo section gained the checkbox "Duo debug
+  mode: wake-ups evaluate but never greet (auto-off after
+  60 min)" wired to the same Store keys, and the Duo status
+  text gained a "Debug mode: ..." line with the suppressions
+  count. `DuoRitual.snapshot()` also carries `debug`,
+  `debug_set_at`, `suppressions` (note: the deployed relay
+  report sanitizer does not whitelist those three keys yet;
+  `last_result` IS whitelisted, so `debug_suppressed` shows in
+  the duo report regardless).
+- Gate suite **263 PASS, ALL_PASS** (11 new duo_debug cases;
+  v1.28 was 252). APK 6,142,117 bytes, SHA-256
+  `014ed2db3f4c09f07b7b27b2f85a01241bb9ce79b4ccaedcac3bf20fa02c6cec`,
+  family cert unchanged; badging versionCode 40 / 1.29.0.
+- **Install + verification on the Duo (2026-11-21)**: installed
+  via the PC adb lane (`adb install -r`), read back
+  versionName 1.29.0 / versionCode 40. Verified on device:
+  (1) the Duo section toggle turns debug on and the status line
+  reads "Debug mode: ON (fire suppressed)"; (2) after a
+  force-stop + relaunch, the status read "Debug mode: off",
+  proving the clear-at-bridge-start behavior live; (3) with
+  debug re-enabled, the app's Test ritual evaluation returned
+  **Last evaluation: debug_suppressed**, suppressions went
+  0 to 1, and Ritual fires stayed at 12 (no voice fire, no
+  payload). Debug was left OFF. Synthetic keyevent sleep/wake
+  cycles do not produce USER_PRESENT on this ROM (lock type is
+  none), which is why the proof used the Test ritual path
+  through the same evaluate code; the two real USER_PRESENT
+  fires that morning (11:02 and 11:12, pre-update code) confirm
+  the broadcast path itself is live.
+- **Bridge-lane caveat**: the Duo app has never been configured
+  with the Worker relay (MainActivity reads "Worker configured:
+  false", "Last report: never"; entering the relay base +
+  secret on the Duo is Jonathan's setup step from the v1.26
+  doc). A `duo_debug_on` enqueued to the duo-bridge queue
+  (cmd-2feec606-3b12-4bec-a929-d677fc29b584) therefore sat
+  pending and the relay read-back could not be exercised; the
+  templates are gate-verified and will answer as soon as the
+  Duo drains its queue. The panels prop behavior, the ritual
+  switch semantics, and all phone-profile behavior are
+  unchanged; the alpha two-panel policy stays OFF.
