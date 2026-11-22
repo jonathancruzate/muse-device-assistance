@@ -21,8 +21,10 @@ control (roadmap in the connector doc,
 execution sequence in `RENAME-PLAN.md` at the project root). What has
 **not** changed, deliberately: the wire names (Worker endpoint
 `/phone-bridge/report`, KV key `phonebridge:report`, report
-`device:"phone-bridge"`) — a live contract with the mode-sync
-Worker, not branding. The label + package rename itself was
+`device:"phone-bridge"`) — a live contract, not branding
+(the wire shape is unchanged; the live counterparty since the
+2026-11-09 transport cut is the box device relay, which ported
+the endpoints verbatim — the Worker is not in this path). The label + package rename itself was
 **executed 2026-11-05** (evidence: `RENAME-PLAN.md` step B,
 `RENAME-BUILD-PLAN.md`): the renamed build (label "Muse Device
 Assistance", package
@@ -419,6 +421,17 @@ until a manual relaunch (platform design, same as MacroDroid).
 **Worker channel (`WorkerClient`)** — Muse's own Cloudflare Worker,
 no third-party relay. Default base URL entered on-device:
 `https://jonathancruzate.com/mode-sync`.
+**(2026-11-16 state: historical as a live description.** Since
+the 2026-11-09 transport cut the app is relay-only — its
+configured base is the box device relay, `WorkerClient` polls
+the relay for everything (mode-state, report POST, command
+channel; handlers ported verbatim from the Worker), and the
+Worker's `phonebridge:report` KV copy is frozen at 2026-11-10.
+The contract below is the wire shape both sides still speak;
+the live counterparty is the relay, never the Worker. VM-side
+Worker traffic uses `https://jonathancruzate.com/bridge` with
+per-lane secrets — see the device-assistance CONNECTOR.md
+Transport status closing note.)
 
 - `GET {base}/mode-state?secret=…` → consumes only
   `desired {mode, seq}` (the existing mode-sync Worker shape). House
@@ -504,6 +517,27 @@ every recovery needed manual phone-side steps.
   intermittently wedges ("connect failed" while the phone is fine); a
   forwarder on a fresh local port connects immediately (recorded
   2026-11-03 in the Phase 2 runbook).
+- **PC ADB lane is PRIMARY and persistent (2026-11-21, Jonathan's
+  order "find a way to persist adb connection without having to do
+  this again"):** Jonathan's PC was paired to the phone's wireless
+  debugging on 2026-11-21 (guid adb-R5CWC22T1CX-cFfpBs) and its adb
+  server auto-connects via mDNS (`adb-R5CWC22T1CX-cFfpBs._adb-tls-connect._tcp`)
+  whenever wireless debugging is on, whatever port adbd rotates to.
+  Drive it through the PC gadget's system.run:
+  `C:\Users\jonat\platform-tools\adb.exe -s 192.168.1.153:<port>`
+  (get the current connect port from `adb mdns services` on the PC or
+  the DA report's connect endpoint; the mDNS serial also works as -s).
+  The VM's own pairing LAPSED (diagnosed 2026-11-21: the live connect
+  port rejected the VM key; the pairing port answered "offline" to
+  connect attempts, which is how the two ports got confused for an
+  evening: in the DA report's endpoints list and in mDNS, the
+  `_adb-tls-pairing` port is NOT a connect endpoint, and dialing it
+  proves nothing about the connect port). Pairing codes are
+  single-shot and the pairing port rotates with every dialog open;
+  a failed pair attempt burns the code. The VM forwarder lane
+  (adb-ensure.sh) is fallback only until the VM is re-paired.
+  Proven on this lane 2026-11-21: DA v1.30.1 install -r (Success,
+  versionCode 42) and the voicemail component-gate read-back.
 - **Self-heal:** if the app holds `WRITE_SECURE_SETTINGS`, it
   re-enables wireless debugging (`Settings.Global adb_wifi_enabled`)
   whenever a bridge cycle finds it off. The grant is one-time, done
@@ -649,8 +683,11 @@ tail. The foreground notification mirrors the live line: observed mode
 
 **Checking state (Muse's read path, in order).**
 
-1. **Latest Worker report** (`phonebridge:report` in the mode-sync
-   Worker KV): `observed.mode` + `raw_mode` + `running`, `desired
+1. **Latest relay report** (`phonebridge:report` in the box
+   device relay's store — the app has been relay-only since the
+   2026-11-09 transport cut; the mode-sync Worker KV copy is
+   frozen at 2026-11-10 and must never be read as live):
+   `observed.mode` + `raw_mode` + `running`, `desired
    {mode, seq}`, `verdict`, `ack`, `plan`, `status`, `adb`,
    `tailscale`, and the report's age/kind. A heartbeat older than
    ~15 minutes with no change report means the loop is silent — treat
@@ -1409,10 +1446,14 @@ channel**.
   channel) instead of asking Jonathan. TV profile: all channels
   gated OFF.
 - **Transport (`PushClient`).** `POST {base}/device-push?secret=…`,
-  JSON `{source, ts, items[]}`, on the **mode-sync Worker** (chosen
-  over phone-ingress so the app's one existing base + secret serves
-  it — no second on-device config). The Worker sanitizes items
-  field-by-field into per-source KV queues `devicepush:<source>`
+  JSON `{source, ts, items[]}` (originally on the **mode-sync
+  Worker**, chosen over phone-ingress so the app's one existing
+  base + secret serves it — no second on-device config; since
+  the 2026-11-09 transport cut `{base}` is the box device relay,
+  which serves the ported handlers, and the `device-push-drain`
+  hook reads the relay store — the Worker's queues are legacy).
+  The serving side sanitizes items
+  field-by-field into per-source queues `devicepush:<source>`
   (cap 500; GET `/device-push?source=…` is the authed read-back /
   future drain contract). On-device, a channel's cursor/last-push
   advance **only on HTTP 2xx**; failures land in the channel's
@@ -2424,3 +2465,100 @@ appointment's join link gets opened on the phone.
   Duo drains its queue. The panels prop behavior, the ritual
   switch semantics, and all phone-profile behavior are
   unchanged; the alpha two-panel policy stays OFF.
+
+## Voicemail module: optional, off by default (v1.30.0)
+
+### v1.30.1 component gating (DEC-0017 condition 1, 2026-11-21)
+
+v1.30.1 (versionCode 42) makes the off-by-default gate OS-level.
+While the module is disabled, VoicemailModule disables the dialer
+qualification components (VoicemailDialActivity, VoicemailInCallService,
+VoicemailVvmService, VoicemailInCallActivity) at the PackageManager
+level, reconciled on every app and service start and on every toggle
+change, so a freshly installed or upgraded app does not sit
+dialer-eligible from the manifest alone. While enabled, the
+components are set ENABLED explicitly. VoicemailExportActivity is
+not gated: it answers MODULE_DISABLED when the module is off. The
+report's voicemail object carries components_enabled and
+components_reconciled_at. Record: docs/v1.30.1-component-gating-2026-11-21.md.
+
+The Muse Voicemail fold-in (Jonathan's order, 2026-11-21). The
+standalone Muse Voicemail app (com.jonathancruzate.metamusevoicemail,
+v1.2.0) is DEPRECATED: do not install or use it. Its capability now
+lives in this app as the Voicemail module. Record:
+`docs/v1.30-voicemail-module-2026-11-21.md`. Automation:
+`~/workspace/muse-device-assistance/voicemail-automation/`
+(voicemail-borrow.sh, tag-lines.py, voice-check.py; state.json and
+voice-state.json carried over with watermarks intact).
+
+* Optional and OFF by default: Store key vm_enabled, flipped only by
+  Jonathan in MainActivity ("Voicemail (optional)" section). While it
+  is off, the capability does not exist: the `voicemail_export` verb
+  refuses typed and the export activity writes
+  `status: MODULE_DISABLED`.
+* Borrow-and-hand-back only, never permanent: READ/WRITE_VOICEMAIL
+  only take effect while the app holds ROLE_DIALER, and Fi's platform
+  VVM type is vvm_type_disabled, so the app can never be a working
+  permanent default. The borrow script snapshots the holder, takes
+  the role, fires VoicemailExportActivity, pulls
+  Download/MuseVoicemailExport.txt, and restores Samsung
+  (com.samsung.android.dialer), with an EXIT trap plus an explicit
+  restore before reporting. Never leave Device Assistance as the
+  default dialer; a restore that cannot be verified is the loudest
+  failure this system has (BORROW_RESULT RESTORE_FAILED, exit 6,
+  surface immediately).
+* The borrow is the FALLBACK, not the default (Jonathan's correction,
+  2026-11-13): the primary lanes need no borrow. Text leg: Fi texts
+  each personal-line (609) voicemail transcript as an SMS in Google
+  Messages (thread with his own number, format "New voicemail from
+  +1 XXX-XXX-XXXX (MM:SS):"), readable via device message.search,
+  query "New voicemail from". Voice leg: public-line (Google Voice,
+  631-619-3585) transcripts arrive in voice-noreply@google.com "New
+  voicemail" emails, covered forward by voice-check.py. The borrow
+  covers provider rows whose transcript never arrives in either lane,
+  read/new state, and full-inbox sweeps. Borrow only on a real
+  trigger or Jonathan's ask, no timer polls.
+* Provider facts: carrier is Google Fi; the Fi app mirrors voicemail
+  into the shared provider, and the provider inbox MIXES BOTH LINES
+  (personal 609 and public Voice 631). A provider row alone cannot
+  say which line it came in on; a voice-noreply email at the same
+  minute proves the Voice line. Tag provenance with tag-lines.py and
+  never upgrade "no Voice notification" into a certainty claim.
+  Census at automation time: 161 rows, about 74 percent carrying
+  Fi's literal "Transcript not available" placeholder, only 10 of
+  161 with downloaded audio. Where the transcription is that
+  placeholder, the content is unknowable from the export: say
+  exactly that, never invent content. Voice-only history: 1,301
+  Voice voicemails (Aug 2021 to Oct 2026) never reached the provider
+  and only 285 carry an email transcript; neither mailbox contains
+  the other, and the pre-2026-11-03 Voice archive is deliberately
+  not swept.
+* Export format: header "MUSE-VOICEMAIL-EXPORT 1.30.0", fields
+  status (OK, NO_ROLE, QUERY_BLOCKED, MODULE_DISABLED), rows,
+  max_id, newest_date_ms, then one block per row, newest first, each
+  carrying "id: <n>". Muse's lane is read-only: no marking read, no
+  deleting, no archiving, no audio playback.
+* Report: the DA report carries a `voicemail` object {enabled,
+  role_held, last_export_at, last_rows, last_status, last_max_id}.
+
+### Voicemail failure classes (borrow script exit codes)
+
+| Status | Meaning | Handling |
+|---|---|---|
+| OK (0) | cycle complete | triage the tagged export |
+| ADB_UNREACHABLE (3) | ADB lane down | log only; keepalive and self-heal own recovery |
+| ROLE_CMD_BLOCKED (4) | shell cannot change role holders | needs-you queue item, dedup voicemail-role-blocked; manual fallback |
+| EXPORT_MISSING (5) | export file never updated | surface in main |
+| RESTORE_FAILED (6) | phone may still have Muse as default dialer | surface in main IMMEDIATELY |
+
+### Voicemail hard rules
+
+* Never leave Device Assistance as the default dialer.
+* Every default-app change auto-turns-off Samsung's "Call & text on
+  other devices"; if Watch or tablet calling breaks, that is the
+  first suspect.
+* The voicemail shade notification is never dismissed (deny-list
+  class), and the borrow leg package-gates: only Fi, Samsung dialer,
+  Samsung in-call UI, or Samsung VVM notifications run the borrow;
+  the Voice app runs the voice leg; a Messages transcript text runs
+  the text leg.
