@@ -697,3 +697,7 @@ present); `screen_status` live-verified. The see/control verbs await
 Jonathan's in-app enable for their first live proofs. Design:
 `docs/v1.25-screen-sharing-design-2026-11-13.md`; record:
 `docs/v1.25-screen-sharing-2026-11-13.md`.
+
+## Screenshots
+
+![Muse Device Assistance running on the Surface Duo (Muse's project phone)](docs/screenshots/device-assistance-duo-main.jpg)
