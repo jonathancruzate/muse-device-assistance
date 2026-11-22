@@ -76,6 +76,11 @@ public final class Reconciler {
             v.plan = "tv profile: house-mode ground truth gated off";
             return finish(ctx, v);
         }
+        if (DeviceProfile.isDuo(ctx)) {
+            v.state = "unknown";
+            v.plan = "duo profile: house-mode ground truth gated off";
+            return finish(ctx, v);
+        }
         String desired = Store.get(ctx, Store.K_DESIRED_MODE, "");
         String gtMode = Store.get(ctx, Store.K_GT_MODE, "");
         String gtRunning = Store.get(ctx, Store.K_GT_RUNNING, "");

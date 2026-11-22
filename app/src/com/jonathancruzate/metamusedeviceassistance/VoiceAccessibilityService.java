@@ -81,6 +81,19 @@ public class VoiceAccessibilityService extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null || event.getPackageName() == null) return;
+        // v1.27: foreground cache for the native screen_foreground
+        // op. Every window-state change records the new foreground
+        // package (any package except our own), so the read is an
+        // O(1) Store lookup instead of a ~45 KB dumpsys over the
+        // shell bridge. Written only on change.
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            String p = event.getPackageName().toString();
+            if (!getPackageName().contentEquals(p)
+                    && !p.equals(Store.get(this, Store.K_FG_PACKAGE, ""))) {
+                Store.put(this, Store.K_FG_PACKAGE, p);
+                Store.put(this, Store.K_FG_AT, System.currentTimeMillis());
+            }
+        }
         // v1.14: the bridge hunt is not aura-gated — when a bridge
         // send is pending, any window change is a chance to run it
         // (the hunt itself launches Muse when it isn't foreground).
@@ -258,6 +271,18 @@ public class VoiceAccessibilityService extends AccessibilityService {
     private int pipWaitAttempts = 0;
 
     private void schedulePipAttempt() {
+        // Plugin-requested no-return fire (v1.26 Duo ritual,
+        // generalized v1.31.0): such an activation NEVER floats
+        // back — Muse stays where the plugin's surface put it.
+        // The flag is consumed by schedulePipAttemptAfterTap on
+        // the normal path; this guard is the backstop for any
+        // other caller that reaches the choke point mid-fire.
+        if (VoiceState.noPipReturnFire) {
+            VoiceState.noPipReturnFire = false;
+            BridgeLog.log(this, "VOICE",
+                    "plugin fire: PiP return suppressed (Muse stays in its panel)");
+            return;
+        }
         // The choke point (v1.17, Jonathan 2026-11-11 20:47 EST —
         // "Prompt first then back to last app"): while a combined
         // voice_call's prompt is unsent, NO return path runs, no
@@ -383,6 +408,32 @@ public class VoiceAccessibilityService extends AccessibilityService {
             maybeRelock("PiP final");
         }
     };
+
+    /** v1.27: the live foreground package, UNFILTERED — the
+     *  active window's root package, else the root package of the
+     *  focused/active window. Used by NativeCommands to VERIFY a
+     *  native launch actually landed (bal_blocked discipline):
+     *  unlike currentForegroundPackage() this applies no
+     *  returnability filtering, so a launch of ANY package
+     *  (including Muse itself) can be confirmed. */
+    public String foregroundPackageRaw() {
+        String pkg = activeRootPackage();
+        if (pkg != null) return pkg;
+        try {
+            List<AccessibilityWindowInfo> wins = getWindows();
+            if (wins != null) {
+                for (AccessibilityWindowInfo w : wins) {
+                    if (w == null || !(w.isActive() || w.isFocused())) continue;
+                    AccessibilityNodeInfo r = null;
+                    try { r = w.getRoot(); } catch (Exception ignored) {}
+                    if (r != null && r.getPackageName() != null) {
+                        return r.getPackageName().toString();
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
 
     /** The package of the active window's root, unfiltered (null
      *  when nothing is observable). */
@@ -848,6 +899,14 @@ public class VoiceAccessibilityService extends AccessibilityService {
     /** Called from the voice hunt the moment the start tap lands:
      *  schedule the PiP attempt now, or hold it for the marker. */
     private void schedulePipAttemptAfterTap() {
+        if (VoiceState.noPipReturnFire) {
+            // Plugin-requested fire: no PiP return for this
+            // activation — see schedulePipAttempt's guard.
+            VoiceState.noPipReturnFire = false;
+            BridgeLog.log(this, "VOICE",
+                    "plugin fire: PiP return suppressed (Muse stays in its panel)");
+            return;
+        }
         if (VoiceState.combinedCallPending) {
             pipDeferredForMarker = true;
             BridgeLog.log(this, "VOICE",
@@ -892,6 +951,15 @@ public class VoiceAccessibilityService extends AccessibilityService {
     private void onMarkerResolved() {
         VoiceState.combinedCallPending = false;
         VoiceState.holdBridgeForSessionLive = false;
+        // A plugin-requested fire ends here — flag cleared, no
+        // dwell, no return (the suppression guards above already
+        // kept the return from scheduling; this is the cleanup for
+        // the path where the tap hook never ran).
+        if (VoiceState.noPipReturnFire) {
+            VoiceState.noPipReturnFire = false;
+            BridgeLog.log(this, "VOICE",
+                    "plugin fire: payload resolved; sequence complete (no return)");
+        }
         if (!pipDeferredForMarker) return;
         pipDeferredForMarker = false;
         BridgeLog.log(this, "VOICE",

@@ -97,6 +97,20 @@ public final class VoiceState {
     public static volatile boolean holdBridgeForSessionLive = false;
     public static volatile long bridgeHoldDeadlineMs = 0;
 
+    /** Plugin-requested no-return fire (v1.26 as the Duo ritual
+     *  flag; generalized in v1.31.0 when the ritual's decision
+     *  logic moved to the Duo Companion plugin): set by
+     *  VoiceBridge.executePluginVoiceRequest for the duration of
+     *  one plugin-requested activation whose end state is Muse
+     *  STAYING where the plugin's surface put it, not floating
+     *  back in PiP. While this flag is set, the accessibility
+     *  service suppresses the PiP return for this activation (the
+     *  tap hook consumes the flag) and onMarkerResolved clears it
+     *  without scheduling any return. In-memory only, like the
+     *  other hunt flags: a process death mid-fire ends the
+     *  activation. */
+    public static volatile boolean noPipReturnFire = false;
+
     /** Locked-screen gate (v1.19, Jonathan 2026-11-12 00:14 EST —
      *  attempt 9 died on a locked screen: "if my screen is locked
      *  it should work like muse voice mode shortcut, try to unlock

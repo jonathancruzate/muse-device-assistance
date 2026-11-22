@@ -159,4 +159,96 @@ public final class VoiceBridge {
                 "voice_call dispatched (voice, marker, then return)",
                 System.currentTimeMillis() - t0, null);
     }
+
+    /** Payload cap for plugin-requested activations: a prime is a
+     *  sentence or two, never a document. */
+    private static final int PLUGIN_PAYLOAD_MAX = 300;
+
+    /**
+     * A plugin-requested voice activation (v1.31.0; generalizes
+     * the v1.26 Duo ritual fire, whose decision logic moved to
+     * the Muse Duo Companion plugin). The combined fire's proven
+     * mechanics (gates -> queue the payload -> launch voice ->
+     * hold typing until the session is observably CONNECTED) with
+     * the caller's two parameters:
+     *   1. The typed text is the caller's payload (the v1.14 prime
+     *      pattern: a typed user turn is the only input a voice
+     *      session hears, so the prime rides the turn itself),
+     *      validated here: non-empty, length-capped.
+     *   2. noPipReturn: while set, VoiceState.noPipReturnFire
+     *      suppresses the PiP float-back for this activation —
+     *      the end state is Muse staying where the plugin's
+     *      surface put it (on the Duo: full-panel left).
+     * Gates are the voice module's own (module switch +
+     * accessibility grant); a refusal is typed, and the caller
+     * (the plugin) treats it as a quiet skip. If a session is
+     * already observably live, nothing is typed and nothing is
+     * relaunched. Reached only through PluginVoiceService, which
+     * the manifest guards with a signature-level permission.
+     * Never throws.
+     */
+    public static LoopbackAdb.Result executePluginVoiceRequest(
+            Context ctx, String payload, boolean noPipReturn) {
+        long t0 = System.currentTimeMillis();
+        if (payload == null || payload.trim().isEmpty()
+                || payload.length() > PLUGIN_PAYLOAD_MAX) {
+            return new LoopbackAdb.Result(false, "",
+                    System.currentTimeMillis() - t0,
+                    "refused: payload missing or over " + PLUGIN_PAYLOAD_MAX + " chars");
+        }
+        VoiceAccessibilityService svc = VoiceAccessibilityService.instance;
+        if (svc == null) {
+            return new LoopbackAdb.Result(false, "",
+                    System.currentTimeMillis() - t0,
+                    "accessibility service not running (grant lost?)");
+        }
+        if (!VoiceModeModule.moduleEnabled(ctx)) {
+            BridgeLog.log(ctx, "VOICE",
+                    "plugin voice REFUSED: voice module disabled in-app");
+            return new LoopbackAdb.Result(false, "",
+                    System.currentTimeMillis() - t0,
+                    "refused: voice module disabled");
+        }
+        if (!VoiceModeModule.accessibilityEnabled(ctx)) {
+            BridgeLog.log(ctx, "VOICE",
+                    "plugin voice REFUSED: accessibility service not enabled");
+            return new LoopbackAdb.Result(false, "",
+                    System.currentTimeMillis() - t0,
+                    "refused: accessibility service not enabled");
+        }
+        if (VoiceState.awaitingBridgeSend) {
+            return new LoopbackAdb.Result(false, "",
+                    System.currentTimeMillis() - t0,
+                    "bridge send already in flight");
+        }
+        boolean live = VoiceState.isActive(ctx)
+                && svc.observeVoiceSessionUi()
+                        == VoiceAccessibilityService.UI_PRESENT;
+        if (live) {
+            BridgeLog.log(ctx, "VOICE",
+                    "plugin voice skipped: session already live");
+            return new LoopbackAdb.Result(false, "",
+                    System.currentTimeMillis() - t0,
+                    "session already live");
+        }
+        // Same hold discipline as the combined fire (v1.16/v1.17):
+        // the payload types only once the session is observably
+        // CONNECTED — a prompt typed before the session exists
+        // lands as pre-session history and the opener ignores it.
+        VoiceState.bridgeText = payload;
+        VoiceState.awaitingBridgeSend = true;
+        VoiceState.noPipReturnFire = noPipReturn;
+        VoiceState.holdBridgeForSessionLive = true;
+        VoiceState.bridgeHoldDeadlineMs =
+                System.currentTimeMillis() + SESSION_LIVE_HOLD_MS;
+        VoiceLauncher.launchVoice(ctx);
+        BridgeLog.log(ctx, "VOICE", "plugin voice dispatched: voice"
+                + " starting; payload types once CONNECTED;"
+                + (noPipReturn ? " no PiP return (plugin surface)"
+                        : " standard return"));
+        return new LoopbackAdb.Result(true,
+                "plugin voice dispatched (payload, "
+                        + (noPipReturn ? "no return" : "standard return") + ")",
+                System.currentTimeMillis() - t0, null);
+    }
 }

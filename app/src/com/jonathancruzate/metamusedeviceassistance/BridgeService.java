@@ -129,20 +129,26 @@ public class BridgeService extends Service {
         thread.start();
         handler = new Handler(thread.getLooper());
         BridgeLog.log(this, "SERVICE", "created profile=" + DeviceProfile.describe(this));
+        // v1.30.1 (DEC-0017 condition 1): reconcile the voicemail
+        // dialer qualification components with the module toggle on
+        // every service start, so a fresh install or upgrade lands
+        // with the components DISABLED while the module is off.
+        if (!DeviceProfile.isTv(this)) VoicemailModule.reconcileComponents(this);
         AdbBridge.startDiscovery(this);
         // v1.7 push observers: ContentObservers + dialer callback,
         // registered on this service's handler thread, gated per
         // channel toggle inside PushObservers (no-op on TV).
         pushObservers = new PushObservers(this, handler);
         pushObservers.start();
-        // v1.26 Duo companion: the wake-ritual watcher lives only
-        // on the Duo profile (DuoRitual.start self-guards too).
-        // v1.29: a set Duo debug flag never survives a service
-        // start (boot, app open, restart) — cleared before the
-        // watcher registers.
+        // v1.31.0: the Duo feature set lives in the Muse Duo
+        // Companion plugin now. On the Duo profile the host only
+        // makes sure the plugin service is resident (its wake
+        // watcher lives there) and runs the one-time state
+        // migration — DuoRouter owns both. The debug flag's
+        // clear-at-start discipline moved into the plugin's own
+        // service start.
         if (DeviceProfile.isDuo(this)) {
-            DuoRitual.clearDebugOnStart(this);
-            DuoRitual.start(this);
+            DuoRouter.onBridgeStart(this);
         }
         handler.post(this::cycle);
         // v1.27: the dedicated command thread (TV keeps no command
@@ -184,7 +190,8 @@ public class BridgeService extends Service {
     @Override
     public void onDestroy() {
         BridgeLog.log(this, "SERVICE", "destroyed");
-        if (DeviceProfile.isDuo(this)) DuoRitual.stop(this);
+        // (v1.31.0: no Duo watcher to stop here — it lives in
+        // the plugin's own service now.)
         if (pushObservers != null) pushObservers.stop();
         if (cmdHandler != null) cmdHandler.removeCallbacksAndMessages(null);
         if (cmdThread != null) cmdThread.quitSafely();
@@ -281,8 +288,8 @@ public class BridgeService extends Service {
         if (DeviceProfile.isDuo(this)) {
             NotificationManager nmDuo = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
             if (nmDuo != null) nmDuo.notify(1, statusNotification(
-                    "Surface Duo profile - duobridge - ritual "
-                            + (DuoRitual.ritualEnabled(this) ? "armed" : "off")
+                    "Surface Duo profile - duobridge - duo plugin "
+                            + (DuoRouter.pluginInstalled(this) ? "companion" : "MISSING")
                             + " (phone surfaces off)"));
             return;
         }

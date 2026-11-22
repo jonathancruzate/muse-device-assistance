@@ -18,6 +18,16 @@ public class BootReceiver extends BroadcastReceiver {
             }
             return;
         }
+        if (DeviceProfile.isDuo(ctx)) {
+            // v1.26: the Duo is a station — it comes up armed after
+            // reboot like the Shield (the ritual watcher lives in
+            // the bridge service).
+            BridgeLog.log(ctx, "BOOT", "duo profile: auto-starting bridge service after boot");
+            try { BridgeService.start(ctx); } catch (Exception e) {
+                BridgeLog.log(ctx, "BOOT", "duo auto-start failed: " + e.getMessage());
+            }
+            return;
+        }
         if (Store.getBool(ctx, Store.K_SERVICE_ON, false)) {
             BridgeLog.log(ctx, "BOOT", "restarting bridge service after boot");
             try {

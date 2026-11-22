@@ -40,6 +40,11 @@ public final class WorkerClient {
         // TV profile: house-mode desired state is a phone surface.
         // A Shield instance must never consume or echo it.
         if (DeviceProfile.isTv(ctx)) return false;
+        // Duo profile (v1.26): same gate — a Duo instance must
+        // never consume the phone's house-mode desired either, and
+        // (consequence, by design) never receives a transport
+        // directive; its relay base is the one entered in setup.
+        if (DeviceProfile.isDuo(ctx)) return false;
         if (!Store.workerConfigured(ctx)) return false;
         String base = Store.get(ctx, Store.K_BASE_URL, "").trim();
         String secret = Store.get(ctx, Store.K_SECRET, "").trim();
@@ -107,6 +112,10 @@ public final class WorkerClient {
         String secret = Store.get(ctx, Store.K_SECRET, "").trim();
         try {
             boolean tv = DeviceProfile.isTv(ctx);
+            // v1.26: the Duo profile gates the Samsung surfaces
+            // exactly like TV (no Modes app exists on the GSI).
+            boolean duo = DeviceProfile.isDuo(ctx);
+            boolean nonPhone = tv || duo;
             JSONObject body = new JSONObject();
             body.put("device", DeviceProfile.deviceString(ctx));
             body.put("profile", DeviceProfile.profileName(ctx));
@@ -114,7 +123,7 @@ public final class WorkerClient {
             body.put("ts", System.currentTimeMillis());
 
             JSONObject observed = new JSONObject();
-            if (tv) {
+            if (nonPhone) {
                 // TV profile: Samsung mode ground truth is gated off.
                 observed.put("mode", "");
                 observed.put("raw_mode", "");
@@ -132,30 +141,40 @@ public final class WorkerClient {
             body.put("observed", observed);
 
             JSONObject desired = new JSONObject();
-            desired.put("mode", tv ? "" : Store.get(ctx, Store.K_DESIRED_MODE, ""));
-            desired.put("seq", tv ? -1 : Store.getLong(ctx, Store.K_DESIRED_SEQ, -1));
+            desired.put("mode", nonPhone ? "" : Store.get(ctx, Store.K_DESIRED_MODE, ""));
+            desired.put("seq", nonPhone ? -1 : Store.getLong(ctx, Store.K_DESIRED_SEQ, -1));
             body.put("desired", desired);
 
-            // On TV there is no reconciler verdict: never claim an ack.
-            String verdict = tv ? "unknown" : Store.get(ctx, Store.K_VERDICT, "unknown");
+            // On TV/Duo there is no reconciler verdict: never claim an ack.
+            String verdict = nonPhone ? "unknown" : Store.get(ctx, Store.K_VERDICT, "unknown");
             body.put("verdict", verdict);
-            body.put("ack", !tv && "in_sync".equals(verdict));
-            body.put("plan", tv ? "tv profile: phone surfaces gated off" : Store.get(ctx, Store.K_PLAN, ""));
+            body.put("ack", !nonPhone && "in_sync".equals(verdict));
+            body.put("plan", tv ? "tv profile: phone surfaces gated off"
+                    : duo ? "duo profile: phone surfaces gated off"
+                    : Store.get(ctx, Store.K_PLAN, ""));
             body.put("status", StatusProducer.produce(ctx));
             // v1.6: Jonathan's per-channel push toggles + last push /
             // last error, so Muse can see the state he set (design §4).
-            // On TV every channel reports on=false (profile gate).
+            // On TV/Duo every channel reports on=false (profile gate).
             body.put("push_channels", PushChannels.snapshot(ctx));
             // v1.13: Muse Wear Installer routing — the last
             // wear_install_face job's stage (phone only: the watch
-            // pairs with the phone, never the TV profile).
-            if (!tv) body.put("wear_install", WearInstallRouter.snapshot(ctx));
+            // pairs with the phone, never the TV or Duo profiles).
+            if (!nonPhone) body.put("wear_install", WearInstallRouter.snapshot(ctx));
             body.put("adb", AdbBridge.snapshot(ctx));
             body.put("tailscale", TailscaleGuard.snapshot(ctx));
             body.put("shell_bridge", ShellBridge.snapshot(ctx));
             // v1.20: Muse Launcher Pack local channel state
             // (paired / counts / last) — never the token.
-            if (!tv) body.put("local_channel", LocalChannel.snapshot(ctx));
+            if (!nonPhone) body.put("local_channel", LocalChannel.snapshot(ctx));
+            // v1.26/v1.31.0: Duo companion state — Duo only.
+            // Since the extraction this is the Duo Companion
+            // plugin's snapshot, passed through by DuoRouter
+            // (cached; plugin_present=false when absent).
+            if (duo) body.put("duo", DuoRouter.snapshot(ctx));
+            // v1.30: voicemail module state, phone only (enabled,
+            // role_held, last export bookkeeping; no content).
+            if (!nonPhone) body.put("voicemail", VoicemailModule.snapshot(ctx));
 
             URL url = new URL(base + "/phone-bridge/report?secret="
                     + URLEncoder.encode(secret, "UTF-8"));

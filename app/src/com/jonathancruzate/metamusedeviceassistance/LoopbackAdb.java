@@ -262,29 +262,69 @@ public final class LoopbackAdb {
                 }
                 if (port <= 0) {
                     BridgeLog.log(ctx, "SHELL", "no discovered ADB endpoint to connect to");
+                    Store.put(ctx, Store.K_ADB_CONNECT_FAIL_AT,
+                            System.currentTimeMillis());
                     return false;
                 }
                 // Loopback first (no LAN in the path); the Wi-Fi address
                 // second (same listener, the address AdbBridge verified).
-                String first = altFirst && host != null ? host : "127.0.0.1";
-                String second = altFirst ? "127.0.0.1" : host;
+                // v1.27: the Wi-Fi-host attempt is SKIPPED when the
+                // phone has no Wi-Fi address at all — the stored
+                // endpoint is Wi-Fi-bound and cannot answer off it
+                // (the 2026-11-18 blackhole).
+                boolean hostUsable = host != null && !AdbBridge.wifiIp(ctx).isEmpty();
+                String first = altFirst && hostUsable ? host : "127.0.0.1";
+                String second = altFirst ? "127.0.0.1" : (hostUsable ? host : null);
                 if (tryConnect(ctx, m, first, port)) return true;
                 if (second != null && !second.equals(first)) {
                     if (tryConnect(ctx, m, second, port)) return true;
                 }
+                Store.put(ctx, Store.K_ADB_CONNECT_FAIL_AT,
+                        System.currentTimeMillis());
                 return false;
             } catch (Exception e) {
                 BridgeLog.log(ctx, "SHELL", "connect failed: "
                         + e.getClass().getSimpleName() + " " + e.getMessage());
+                Store.put(ctx, Store.K_ADB_CONNECT_FAIL_AT,
+                        System.currentTimeMillis());
                 return false;
             }
         }
     }
 
     private static boolean tryConnect(Context ctx, ShellManager m, String host, int port) {
+        // v1.27: an attempt against the stored Wi-Fi host while the
+        // phone is on a DIFFERENT network is capped at ~5 s on the
+        // IO executor — libadb's own connect burned ~130 s against
+        // the blackholed address on 2026-11-18. On-network and
+        // loopback attempts run inline (they fail fast locally).
+        if (!"127.0.0.1".equals(host)) {
+            String wifi = AdbBridge.wifiIp(ctx);
+            if (!wifi.isEmpty() && !wifi.equals(host)) {
+                Future<Boolean> f = IO.submit(() -> doConnect(ctx, m, host, port));
+                try {
+                    return f.get(5, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    f.cancel(true);
+                    BridgeLog.log(ctx, "SHELL", "connect " + host + ":" + port
+                            + " capped at 5s (off-network attempt)");
+                    return false;
+                }
+            }
+        }
+        return doConnect(ctx, m, host, port);
+    }
+
+    private static boolean doConnect(Context ctx, ShellManager m, String host, int port) {
         try {
             boolean ok = m.connect(host, port);
             if (ok) {
+                // v1.27: a live connection is the lane's health
+                // proof — stamp it for adbReady() and clear the
+                // Wi-Fi-loss down flag.
+                Store.put(ctx, Store.K_ADB_CONNECT_OK_AT,
+                        System.currentTimeMillis());
+                Store.put(ctx, Store.K_ADB_DOWN, false);
                 // v1.4.1: let the negotiated session settle briefly
                 // before the first stream opens, and record what was
                 // actually negotiated (protocol version + maxData) so
@@ -301,6 +341,13 @@ public final class LoopbackAdb {
                 try {
                     Thread.sleep(300);
                 } catch (InterruptedException ignored) {}
+                // v1.27 health bookkeeping: a live connect is the
+                // lane's ground truth — stamp it, clear the failure
+                // stamp and the adb_down flag.
+                Store.put(ctx, Store.K_ADB_CONNECT_OK_AT,
+                        System.currentTimeMillis());
+                Store.put(ctx, Store.K_ADB_CONNECT_FAIL_AT, 0);
+                Store.put(ctx, Store.K_ADB_DOWN, false);
             } else {
                 BridgeLog.log(ctx, "SHELL", "connect " + host + ":" + port + " -> false");
             }
@@ -324,14 +371,82 @@ public final class LoopbackAdb {
         public final String stdoutTail;
         public final long ms;
         public final String error;
+        /** v1.27: this failure was a CONNECT failure (the ADB lane
+         *  itself is down), as opposed to a stream failure on a live
+         *  connection. execute() never retries connect failures. */
+        public final boolean connectFailed;
 
         Result(boolean ok, String stdoutTail, long ms, String error) {
+            this(ok, stdoutTail, ms, error, false);
+        }
+
+        Result(boolean ok, String stdoutTail, long ms, String error,
+               boolean connectFailed) {
             this.ok = ok;
             this.exit = -1;
             this.stdoutTail = stdoutTail;
             this.ms = ms;
             this.error = error;
+            this.connectFailed = connectFailed;
         }
+    }
+
+    // ---- v1.27 fail-fast ADB health gate -----------------------------
+    // (docs/lag-diagnosis-2026-11-18.md). The wireless-debugging
+    // endpoint is Wi-Fi-bound: off that network it is a blackhole,
+    // and libadb's connect burned ~130 s per attempt against it
+    // (2026-11-18: nav_open 260 s wall). The gate answers "can a
+    // connect plausibly succeed RIGHT NOW" from local state only,
+    // in well under a second: Wi-Fi up, a discovered endpoint ON
+    // the current Wi-Fi network, no connect failure in the last
+    // 60 s. Null return = plausibly ready (proceed to connect).
+
+    public static String adbUnavailableReason(Context ctx) {
+        try {
+            if (isConnected(ctx)) return null;
+            String wifi = AdbBridge.wifiIp(ctx);
+            if (wifi.isEmpty()) {
+                return "no wifi network (the adb endpoint is wifi-bound)";
+            }
+            String ep = Store.get(ctx, Store.K_ADB_ENDPOINT, "").trim();
+            if (ep.isEmpty()) return "no discovered adb endpoint";
+            int colon = ep.lastIndexOf(':');
+            String host = colon > 0 ? ep.substring(0, colon) : "";
+            if (!host.equals(wifi) && !"127.0.0.1".equals(host)) {
+                return "adb endpoint " + ep + " is not on the current"
+                        + " wifi network (" + wifi + ")";
+            }
+            long failAt = Store.getLong(ctx, Store.K_ADB_CONNECT_FAIL_AT, 0);
+            if (failAt > 0 && System.currentTimeMillis() - failAt < 60_000) {
+                return "adb connect failed within the last 60s";
+            }
+            return null;
+        } catch (Exception e) {
+            return null; // never let the gate itself block the lane
+        }
+    }
+
+    /** Report-grade readiness: connected now, or the gate is clean
+     *  AND a connect succeeded within the last 15 minutes. */
+    public static boolean adbReady(Context ctx) {
+        try {
+            if (isConnected(ctx)) return true;
+            if (adbUnavailableReason(ctx) != null) return false;
+            long okAt = Store.getLong(ctx, Store.K_ADB_CONNECT_OK_AT, 0);
+            return okAt > 0 && System.currentTimeMillis() - okAt < 15 * 60_000;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Wi-Fi loss (AdbBridge NetworkCallback): reap the connection
+     *  and flag the lane down, so the next shell command fails fast
+     *  and the report shows adb_down instead of a stale endpoint. */
+    public static void onNetworkLost(Context ctx) {
+        reap(ctx);
+        Store.put(ctx, Store.K_ADB_DOWN, true);
+        Store.put(ctx, Store.K_ADB_CONNECT_FAIL_AT, System.currentTimeMillis());
+        BridgeLog.log(ctx, "SHELL", "wifi lost: loopback connection reaped, adb_down set");
     }
 
     /**
@@ -341,22 +456,44 @@ public final class LoopbackAdb {
      * call this with anything that did not pass the gate.
      */
     public static Result execute(Context ctx, String[] argv) {
+        // v1.27 fail-fast gate: when the lane is provably down
+        // (off Wi-Fi, stale endpoint, fresh connect failure), fail
+        // in well under a second with the typed adb_unavailable
+        // error instead of burning ~130 s per connect attempt
+        // against a blackholed address (2026-11-18 incident).
+        if (!isConnected(ctx)) {
+            String why = adbUnavailableReason(ctx);
+            if (why != null) {
+                BridgeLog.log(ctx, "SHELL", "adb gate: " + why);
+                return new Result(false, why, 0, "adb_unavailable");
+            }
+        }
         Result r = executeOnce(ctx, argv, false);
         if (r.ok) return r;
+        if (r.connectFailed) {
+            // v1.27: NO second pass on a connect failure — the
+            // retry is what doubled 130 s into 260 s on 2026-11-18.
+            return new Result(false, r.stdoutTail, r.ms, "adb_unavailable");
+        }
         // v1.4.1: one clean retry on a fresh connection from the other
         // source address (loopback <-> Wi-Fi). Every allowlisted
         // template is idempotent (absolute sets and reads), so a retry
         // after an ambiguous transport failure cannot double-apply.
+        // (Stream failures on a live connection only — see above.)
         BridgeLog.log(ctx, "SHELL", "execute retrying once on a fresh connection (alt host first)");
         reap(ctx);
         Result r2 = executeOnce(ctx, argv, true);
+        if (!r2.ok && r2.connectFailed) {
+            return new Result(false, r2.stdoutTail, r2.ms, "adb_unavailable");
+        }
         return r2.ok ? r2 : r;
     }
 
     private static Result executeOnce(Context ctx, String[] argv, boolean altFirst) {
         long t0 = System.currentTimeMillis();
         if (!ensureConnected(ctx, altFirst)) {
-            return new Result(false, "", System.currentTimeMillis() - t0, "not connected");
+            return new Result(false, "", System.currentTimeMillis() - t0,
+                    "not connected", true);
         }
         String cmdline = String.join(" ", argv);
         Future<Result> fut = IO.submit(() -> {

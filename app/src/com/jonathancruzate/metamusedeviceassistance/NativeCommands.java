@@ -118,34 +118,10 @@ public final class NativeCommands {
                     return setDnd(ctx, true, t0);
                 case "dnd_off":
                     return setDnd(ctx, false, t0);
-                // ---- v1.29 Duo debug mode ----
-                // Fixed ops on DuoRitual's debug flag. Harmless on
-                // any profile (the flag is only ever read by the
-                // Duo ritual), so no profile gate here — the Duo
-                // queue is the only lane that should send them.
-                case "duo_debug_on": {
-                    DuoRitual.setDebug(ctx, true);
-                    BridgeLog.log(ctx, "DUO", "debug ON via bridge template (60-min TTL)");
-                    return new LoopbackAdb.Result(true,
-                            "duo_debug=on (auto-expires in 60 min)",
-                            System.currentTimeMillis() - t0, null);
-                }
-                case "duo_debug_off": {
-                    DuoRitual.setDebug(ctx, false);
-                    BridgeLog.log(ctx, "DUO", "debug OFF via bridge template");
-                    return new LoopbackAdb.Result(true, "duo_debug=off",
-                            System.currentTimeMillis() - t0, null);
-                }
-                case "duo_debug_get": {
-                    boolean on = DuoRitual.debugActive(ctx);
-                    long setAt = Store.getLong(ctx, Store.K_DUO_DEBUG_SET_AT, 0);
-                    return new LoopbackAdb.Result(true,
-                            "duo_debug=" + (on ? "on" : "off")
-                                    + " set_at=" + setAt
-                                    + " suppressions=" + Store.getLong(ctx,
-                                            Store.K_DUO_DEBUG_SUPPRESSIONS, 0),
-                            System.currentTimeMillis() - t0, null);
-                }
+                // Duo ops (duo_debug_*, duo_panels_get) are NOT
+                // here since v1.31.0: ShellBridge routes every
+                // duo_* op to the Duo Companion plugin via
+                // DuoRouter before this executor is reached.
                 case "torch_on":
                     return setTorch(ctx, true, t0);
                 case "torch_off":

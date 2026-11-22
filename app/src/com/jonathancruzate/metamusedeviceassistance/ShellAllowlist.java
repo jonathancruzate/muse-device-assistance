@@ -115,14 +115,13 @@ public final class ShellAllowlist {
             "dnd_on",               // cmd notification set_dnd on
             "dnd_off",              // cmd notification set_dnd off
             "screen_foreground",    // dumpsys window displays | grep -m 1 mCurrentFocus
-            // ---- v1.26 Duo companion ----
-            // DUO-DE's opt-in two-panel windowing switch. Both are
-            // FIXED zero-arg templates: the property name and value
-            // are compile-time constants, so no caller (the ritual
-            // on-device, or Muse via the duobridge queue) can ever
-            // set any other property or value through them.
-            "duo_panels_on",        // setprop persist.debug.phh.duo.panels true
-            "duo_panels_get",       // getprop persist.debug.phh.duo.panels
+            // ---- v1.26 Duo companion — REMOVED in v1.31.0 ----
+            // duo_panels_on (setprop persist.debug.phh.duo.panels
+            // true) is GONE: the alpha two-panel policy stays OFF
+            // (Jonathan's standing order), and the extraction must
+            // not carry an ensure-ON path. duo_panels_get survives
+            // as a NATIVE template below, routed to the Duo
+            // Companion plugin, which reads the prop read-only.
     };
 
     // ---- v1.5 native (on-device, NOT shell) templates -------------------
@@ -269,17 +268,24 @@ public final class ShellAllowlist {
             // the URL can never satisfy shared hygiene() ('?', '&',
             // '=' are legitimate here) and NEVER becomes shell text.
             "link_open",
-            // ---- v1.29 Duo debug mode ----
-            // args: NONE. Fixed on-device ops on DuoRitual's debug
-            // flag (the duo_panels_on/get discipline: the template
-            // name is the whole instruction, no caller-supplied
-            // value exists to smuggle). duo_debug_on stamps the
-            // 60-minute TTL; duo_debug_get reads back the EFFECTIVE
-            // state (an expired flag reads off). Executed by
-            // NativeCommands, never as shell text.
-            "duo_debug_on",        // args: none -> set Duo debug flag
-            "duo_debug_off",       // args: none -> clear Duo debug flag
-            "duo_debug_get",       // args: none -> effective debug state
+            // ---- Duo plugin routing (v1.29 debug; v1.31.0 extraction) ----
+            // args: NONE. Fixed ops routed by DuoRouter to the
+            // Muse Duo Companion plugin (the template name is the
+            // whole instruction, no caller-supplied value exists
+            // to smuggle). duo_debug_on stamps the 60-minute TTL;
+            // duo_debug_get reads back the EFFECTIVE state (an
+            // expired flag reads off); duo_panels_get reads the
+            // DUO-DE two-panel prop READ-ONLY (the plugin never
+            // sets it; duo_panels_on was deleted in v1.31.0).
+            // Never shell text.
+            // ---- v1.30 voicemail module ----
+            // args: none -> VoicemailModule: gated export, refused
+            // typed when the module is disabled in-app.
+            "voicemail_export",
+            "duo_debug_on",        // args: none -> plugin: set Duo debug flag
+            "duo_debug_off",       // args: none -> plugin: clear Duo debug flag
+            "duo_debug_get",       // args: none -> plugin: effective debug state
+            "duo_panels_get",      // args: none -> plugin: read panels prop (read-only)
     };
 
     public static boolean isNativeTemplate(String template) {
@@ -416,6 +422,9 @@ public final class ShellAllowlist {
             case "voice_call":
                 if (!args.isEmpty()) return nRefuse("takes no args");
                 return nAllow("voice_call");
+            case "voicemail_export":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return nAllow("voicemail_export");
             // ---- v1.29 Duo debug mode (fixed, zero args) ----
             case "duo_debug_on":
                 if (!args.isEmpty()) return nRefuse("takes no args");
@@ -426,6 +435,9 @@ public final class ShellAllowlist {
             case "duo_debug_get":
                 if (!args.isEmpty()) return nRefuse("takes no args");
                 return nAllow("duo_debug_get");
+            case "duo_panels_get":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return nAllow("duo_panels_get");
             // ---- v1.5.1 Galaxy Buds plugin routing ----
             case "buds_status":
                 if (!args.isEmpty()) return nRefuse("takes no args");
@@ -1090,17 +1102,9 @@ public final class ShellAllowlist {
             case "dnd_off":
                 if (!args.isEmpty()) return refuse("takes no args");
                 return allow("cmd", "notification", "set_dnd", "off");
-            case "duo_panels_on":
-                // v1.26: DUO-DE two-panel windowing, ON. Fixed argv —
-                // see the TEMPLATES entry. persist.* survives reboot,
-                // so this is an ensure, not a per-boot requirement.
-                if (!args.isEmpty()) return refuse("takes no args");
-                return allow("setprop", "persist.debug.phh.duo.panels", "true");
-            case "duo_panels_get":
-                // v1.26: read-back for duo_panels_on (and for the
-                // ritual's ensure-then-verify discipline).
-                if (!args.isEmpty()) return refuse("takes no args");
-                return allow("getprop", "persist.debug.phh.duo.panels");
+            // duo_panels_on / duo_panels_get shell forms deleted
+            // in v1.31.0 (see the TEMPLATES note): unknown here,
+            // so the shell gate refuses them like any stranger.
             case "screen_foreground":
                 // The ONE fixed-pipe template: template text is a
                 // compile-time constant, the template takes ZERO

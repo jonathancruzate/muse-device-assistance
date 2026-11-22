@@ -233,6 +233,30 @@ public final class Store {
     public static final String K_DUO_DEBUG = "duo_debug";                   // debug flag (default false)
     public static final String K_DUO_DEBUG_SET_AT = "duo_debug_set_at";     // epoch ms the flag was set (TTL authority)
     public static final String K_DUO_DEBUG_SUPPRESSIONS = "duo_debug_suppressions"; // cumulative suppressed evaluations
+    // v1.31.0: the Duo feature set was extracted to the Muse Duo
+    // Companion plugin. The K_DUO_* keys above are now LEGACY: read
+    // once by DuoRouter to build the one-time migration payload,
+    // never written again. The keys below are the host's own
+    // plugin bookkeeping (migration done flag + the report's
+    // cached plugin snapshot).
+    public static final String K_DUO_MIGRATED = "duo_state_migrated";       // host->plugin handover done
+    public static final String K_DUO_SNAPSHOT_CACHE = "duo_snapshot_cache"; // last good plugin duo JSON
+    public static final String K_DUO_SNAPSHOT_AT = "duo_snapshot_at";       // epoch ms of that snapshot
+
+    // Voicemail module (v1.30.0), the Muse Voicemail fold-in.
+    // OPTIONAL, OFF by default, VoiceModeModule pattern: while
+    // K_VM_ENABLED is false the capability does not exist.
+    public static final String K_VM_ENABLED = "vm_enabled";
+    public static final String K_VM_LAST_EXPORT_AT = "vm_last_export_at";
+    public static final String K_VM_LAST_ROWS = "vm_last_rows";
+    public static final String K_VM_LAST_STATUS = "vm_last_status";
+    public static final String K_VM_LAST_MAX_ID = "vm_last_max_id";
+    // v1.30.1 component gating (DEC-0017 condition 1): the OS-level
+    // state of the dialer qualification components, reconciled with
+    // K_VM_ENABLED. components_enabled is true only when every
+    // qualification component is enabled at the PackageManager level.
+    public static final String K_VM_COMPONENTS_ENABLED = "vm_components_enabled";
+    public static final String K_VM_COMPONENTS_AT = "vm_components_at"; // epoch ms of last reconcile
 
     // Tailscale guardian (v1.3.1 detection; v1.3.2 reviver)
     public static final String K_TS_DOWN_SINCE = "ts_down_since";   // epoch ms tailnet first seen down (0 = up)

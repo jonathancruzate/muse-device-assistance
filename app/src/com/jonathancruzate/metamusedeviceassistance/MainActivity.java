@@ -40,11 +40,10 @@ public class MainActivity extends Activity {
     private TextView screenView;
     private android.widget.CheckBox screenCheck;
     private boolean syncingScreenCheck;
-    private TextView duoView;
-    private android.widget.CheckBox duoCheck;
-    private boolean syncingDuoCheck;
-    private android.widget.CheckBox duoDebugCheck;
-    private boolean syncingDuoDebugCheck;
+    private TextView vmView;
+    private android.widget.CheckBox vmCheck;
+    private boolean syncingVmCheck;
+    private LinearLayout pluginsRoot;
     private TextView pushView;
     private android.widget.CheckBox[] pushChecks;
     private boolean syncingPushCheck;
@@ -59,6 +58,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // v1.30.1: first launch after install or upgrade reconciles
+        // the voicemail component gate before anything else.
+        VoicemailModule.reconcileComponents(this);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -433,68 +435,74 @@ public class MainActivity extends Activity {
             }).start();
         }));
 
-        // ---- v1.26 Duo companion section: rendered ONLY on the
-        // Duo profile; the phone and Shield never see it.
-        if (DeviceProfile.isDuo(this)) {
-            TextView duoLabel = new TextView(this);
-            duoLabel.setText("\nSurface Duo companion — wake ritual (v1.26)");
-            duoLabel.setTextSize(16);
-            root.addView(duoLabel);
+        TextView vmLabel = new TextView(this);
+        vmLabel.setText("\nVoicemail (optional)");
+        vmLabel.setTextSize(16);
+        root.addView(vmLabel);
 
-            TextView duoHint = new TextView(this);
-            duoHint.setText("When you open the Duo flat and unlock it: the "
-                    + "two-panel windowing prop is ensured on, Muse opens in "
-                    + "its panel and a voice session starts with a spoken "
-                    + "greeting (\"Jonathan just opened his Surface Duo\"), and "
-                    + "the right panel stays free for work — Muse can drive "
-                    + "it through the Screen sharing module above. The ritual "
-                    + "rides gates that are all yours: this switch, the Voice "
-                    + "module above, the accessibility grant, and the shell "
-                    + "bridge pairing (for the panels prop). While any gate is "
-                    + "closed the ritual skips quietly — it never half-fires "
-                    + "and never talks over a live session.");
-            root.addView(duoHint);
+        TextView vmHint = new TextView(this);
+        vmHint.setText("Reads the carrier visual voicemail provider by briefly "
+                + "borrowing the default dialer role, exporting to "
+                + "Download/MuseVoicemailExport.txt, and handing the role "
+                + "straight back to Samsung. Optional and OFF by default. "
+                + "While the box is unchecked, the export writes "
+                + "MODULE_DISABLED and the voicemail command is refused: "
+                + "the capability does not exist. Since v1.30.1 the dialer "
+                + "qualification components are also disabled at the OS "
+                + "level while the module is off. This app never stays "
+                + "the default dialer.");
+        root.addView(vmHint);
 
-            duoCheck = new android.widget.CheckBox(this);
-            duoCheck.setText("Duo wake ritual: greet me when I open and unlock the Duo");
-            duoCheck.setChecked(Store.getBool(this, Store.K_DUO_RITUAL_ENABLED, false));
-            duoCheck.setOnCheckedChangeListener((v, checked) -> {
-                if (syncingDuoCheck) return;
-                Store.put(this, Store.K_DUO_RITUAL_ENABLED, checked);
-                BridgeLog.log(this, "DUO", "ritual " + (checked ? "ENABLED" : "DISABLED") + " from UI");
-                refresh();
-            });
-            root.addView(duoCheck);
+        vmCheck = new android.widget.CheckBox(this);
+        vmCheck.setText("Voicemail module: allow Muse voicemail borrow-and-export");
+        vmCheck.setChecked(Store.getBool(this, Store.K_VM_ENABLED, false));
+        vmCheck.setOnCheckedChangeListener((v, checked) -> {
+            if (syncingVmCheck) return;
+            Store.put(this, Store.K_VM_ENABLED, checked);
+            VoicemailModule.reconcileComponents(this);
+            BridgeLog.log(this, "VOICEMAIL", "module " + (checked ? "ENABLED" : "DISABLED") + " from UI");
+            refresh();
+        });
+        root.addView(vmCheck);
 
-            // v1.29: debug toggle on the same Store key the bridge
-            // templates write. While on, the ritual evaluates but
-            // never fires (debug_suppressed); it auto-expires after
-            // 60 minutes and clears when the bridge service starts.
-            duoDebugCheck = new android.widget.CheckBox(this);
-            duoDebugCheck.setText("Duo debug mode: wake-ups evaluate but never greet (auto-off after 60 min)");
-            duoDebugCheck.setChecked(DuoRitual.debugActive(this));
-            duoDebugCheck.setOnCheckedChangeListener((v, checked) -> {
-                if (syncingDuoDebugCheck) return;
-                DuoRitual.setDebug(this, checked);
-                BridgeLog.log(this, "DUO", "debug " + (checked ? "ENABLED" : "DISABLED") + " from UI");
-                refresh();
-            });
-            root.addView(duoDebugCheck);
+        vmView = new TextView(this);
+        vmView.setTextIsSelectable(true);
+        root.addView(vmView);
 
-            duoView = new TextView(this);
-            duoView.setTextIsSelectable(true);
-            root.addView(duoView);
+        root.addView(button("Test voicemail export", v -> {
+            new Thread(() -> {
+                LoopbackAdb.Result r = VoicemailModule.execute(this, "voicemail_export");
+                runOnUiThread(() -> {
+                    toast(r.ok ? r.stdoutTail : "Voicemail export refused: " + r.error);
+                    refresh();
+                });
+            }).start();
+        }));
 
-            root.addView(button("Test ritual now", v -> {
-                new Thread(() -> {
-                    String outcome = DuoRitual.testFire(this);
-                    runOnUiThread(() -> {
-                        toast("Ritual: " + outcome);
-                        refresh();
-                    });
-                }).start();
-            }));
-        }
+        // ---- Plugins section (v1.31.0): every registered
+        // plugin, managed from inside this app (Jonathan's
+        // standing plugin rule, 2026-11-22: plugins are
+        // drawer-hidden and host-managed, Galaxy Wearable style).
+        // Replaces the v1.26 Duo section: the Duo feature set
+        // lives in the Muse Duo Companion plugin now, and this
+        // section is its host-side surface (state, Open,
+        // Uninstall) alongside the Galaxy Buds plugin.
+        TextView pluginsLabel = VdsUi.text(this, "Plugins", 20, 600,
+                VdsUi.textPrimary(this));
+        pluginsLabel.setPadding(0, (int) VdsUi.dp(this, 16), 0, 0);
+        root.addView(pluginsLabel);
+        TextView pluginsHint = VdsUi.text(this,
+                "Device Assistance plugins live in their own apps and never "
+                        + "appear in the app drawer. Open one to manage its "
+                        + "settings; uninstall fires the system uninstall flow.",
+                13, 400, VdsUi.textSecondary(this));
+        pluginsHint.setPadding(0, (int) VdsUi.dp(this, 4), 0,
+                (int) VdsUi.dp(this, 8));
+        root.addView(pluginsHint);
+        pluginsRoot = new LinearLayout(this);
+        pluginsRoot.setOrientation(LinearLayout.VERTICAL);
+        root.addView(pluginsRoot);
+        renderPlugins();
 
         TextView pushLabel = new TextView(this);
         pushLabel.setText("\nPush channels — this device → Muse (you control each one)");
@@ -858,23 +866,75 @@ public class MainActivity extends Activity {
             }
         }
 
-        if (duoView != null) {
-            duoView.setText(DuoRitual.statusText(this));
-            if (duoCheck != null) {
-                syncingDuoCheck = true;
-                duoCheck.setChecked(Store.getBool(this, Store.K_DUO_RITUAL_ENABLED, false));
-                syncingDuoCheck = false;
-            }
-            if (duoDebugCheck != null) {
-                syncingDuoDebugCheck = true;
-                duoDebugCheck.setChecked(DuoRitual.debugActive(this));
-                syncingDuoDebugCheck = false;
+        if (vmView != null) {
+            vmView.setText(VoicemailModule.uiState(this));
+            if (vmCheck != null) {
+                syncingVmCheck = true;
+                vmCheck.setChecked(Store.getBool(this, Store.K_VM_ENABLED, false));
+                syncingVmCheck = false;
             }
         }
+
+        if (pluginsRoot != null) renderPlugins();
 
         List<String> tail = BridgeLog.tail(this, 40);
         StringBuilder lb = new StringBuilder();
         for (String line : tail) lb.append(line).append('\n');
         logView.setText(lb.toString());
+    }
+
+    /** Plugins section rows (v1.31.0): one VDS card per
+     *  registered plugin — name, blurb, installed state/version,
+     *  Open + Uninstall when installed. Rebuilt on every refresh
+     *  so install/uninstall changes show without a restart. */
+    private void renderPlugins() {
+        pluginsRoot.removeAllViews();
+        for (final PluginRegistry.Plugin p : PluginRegistry.ALL) {
+            LinearLayout card = VdsUi.card(this);
+            card.addView(VdsUi.text(this, p.label, 17, 600,
+                    VdsUi.textPrimary(this)));
+            TextView blurb = VdsUi.text(this, p.blurb, 13, 400,
+                    VdsUi.textSecondary(this));
+            blurb.setPadding(0, (int) VdsUi.dp(this, 4), 0, 0);
+            card.addView(blurb);
+            String ver = PluginRegistry.installedVersion(this, p);
+            TextView status = VdsUi.text(this,
+                    ver != null ? "Installed · v" + ver
+                            : "Not installed · " + p.namespace
+                                    + "_* commands return plugin_not_installed",
+                    15, 400,
+                    ver != null ? VdsUi.textPrimary(this)
+                            : VdsUi.destructive(this));
+            status.setPadding(0, (int) VdsUi.dp(this, 6), 0, 0);
+            card.addView(status);
+            if (ver != null) {
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setPadding(0, (int) VdsUi.dp(this, 10), 0, 0);
+                Button open = VdsUi.pillButton(this, "Open", true);
+                open.setOnClickListener(v -> {
+                    if (!PluginRegistry.openSettings(this, p)) {
+                        toast(p.label + ": settings screen unavailable");
+                    }
+                });
+                LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+                olp.setMargins(0, 0, (int) VdsUi.dp(this, 8), 0);
+                open.setLayoutParams(olp);
+                Button un = VdsUi.pillButton(this, "Uninstall", false);
+                un.setTextColor(VdsUi.destructive(this));
+                un.setOnClickListener(v -> {
+                    if (!PluginRegistry.requestUninstall(this, p)) {
+                        toast(p.label + ": uninstall flow unavailable");
+                    }
+                });
+                un.setLayoutParams(new LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+                row.addView(open);
+                row.addView(un);
+                card.addView(row);
+            }
+            pluginsRoot.addView(card);
+        }
     }
 }

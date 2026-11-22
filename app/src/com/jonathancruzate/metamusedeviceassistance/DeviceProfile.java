@@ -32,9 +32,37 @@ import android.os.Build;
  *   - The loopback shell bridge is gated off on TV in v1.5.0: Shield
  *     debugging is LAN ADB (:5555), not the phone's wireless-debugging
  *     pairing flow — a TV shell lane is a separate design if wanted.
+ *
+ * v1.26 DUO profile (2026-11-14): a third profile for Jonathan's
+ * Surface Duo 1 running the DUO-DE Android 16 GSI — the "Duo
+ * companion" (design: docs/v1.26-duo-companion-2026-11-14.md).
+ * Detection: Build.DEVICE / Build.PRODUCT containing "surfaceduo"
+ * (the Duo's stock + GSI props: product surfaceduo, verified from
+ * the device's pre-flash capture) or Build.MODEL containing
+ * "surface duo". Checked AFTER TV (a Duo is never a TV) and cached
+ * the same way. All Duo behavior is fenced behind isDuo() so the
+ * phone and TV builds cannot regress:
+ *   - Reports carry device="duo-bridge" and profile="duo"; the
+ *     relay stores them under duobridge:report / duobridge:* command
+ *     keys, never the phone's (the shield-bridge precedent).
+ *   - Phone-only surfaces are gated off exactly as on TV (Samsung
+ *     mode ground truth / reconciler / house-mode desired fetch /
+ *     push channels) — there is no Samsung Modes app on the GSI.
+ *   - The loopback shell bridge STAYS ON (unlike TV): the Duo's
+ *     wireless debugging is the same AOSP pairing flow as the
+ *     phone's, and the bridge is how the wake ritual ensures the
+ *     two-panel prop and how Muse drives the Duo's screen.*
+ *     verbs.
+ *   - BridgeService auto-starts like TV (a station device comes up
+ *     armed after boot / app open).
+ *   - The Duo feature set (wake ritual, debug mode, posture)
+ *     runs in the Muse Duo Companion plugin since v1.31.0;
+ *     this core keeps only the Duo detection + duo-bridge wire
+ *     identity and gates the phone surfaces off.
  */
 public final class DeviceProfile {
     private static Boolean cachedTv = null;
+    private static Boolean cachedDuo = null;
 
     private DeviceProfile() {}
 
@@ -60,15 +88,39 @@ public final class DeviceProfile {
         return tv;
     }
 
+    /** Surface Duo profile (v1.26). Never true on the phone or the
+     *  Shield: the check is the Duo's own build identity, which
+     *  neither device can present. */
+    public static synchronized boolean isDuo(Context ctx) {
+        if (cachedDuo != null) return cachedDuo;
+        boolean duo = false;
+        if (!isTv(ctx)) {
+            try {
+                String device = Build.DEVICE == null ? "" : Build.DEVICE.toLowerCase();
+                String product = Build.PRODUCT == null ? "" : Build.PRODUCT.toLowerCase();
+                String model = Build.MODEL == null ? "" : Build.MODEL.toLowerCase();
+                duo = device.contains("surfaceduo")
+                        || product.contains("surfaceduo")
+                        || model.contains("surface duo");
+            } catch (Exception ignored) {}
+        }
+        cachedDuo = duo;
+        return duo;
+    }
+
     public static boolean isPhone(Context ctx) { return !isTv(ctx); }
 
     /** Worker "device" wire string for this instance. */
     public static String deviceString(Context ctx) {
-        return isTv(ctx) ? "shield-bridge" : "phone-bridge";
+        if (isTv(ctx)) return "shield-bridge";
+        if (isDuo(ctx)) return "duo-bridge";
+        return "phone-bridge";
     }
 
     public static String profileName(Context ctx) {
-        return isTv(ctx) ? "tv" : "phone";
+        if (isTv(ctx)) return "tv";
+        if (isDuo(ctx)) return "duo";
+        return "phone";
     }
 
     public static String describe(Context ctx) {

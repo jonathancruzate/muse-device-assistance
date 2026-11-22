@@ -104,9 +104,10 @@ public final class PushChannels {
         return Store.getBool(ctx, c.toggleKey, c.defaultOn);
     }
 
-    /** Effective state: TV profile gates every push channel OFF. */
+    /** Effective state: TV and Duo profiles gate every push channel OFF. */
     public static boolean isOn(Context ctx, Channel c) {
         if (DeviceProfile.isTv(ctx)) return false;
+        if (DeviceProfile.isDuo(ctx)) return false;
         return storedOn(ctx, c);
     }
 
@@ -123,10 +124,11 @@ public final class PushChannels {
     public static JSONObject snapshot(Context ctx) {
         JSONObject o = new JSONObject();
         boolean tv = DeviceProfile.isTv(ctx);
+        boolean duo = DeviceProfile.isDuo(ctx);
         try {
             for (Channel c : ALL) {
                 JSONObject ch = new JSONObject();
-                ch.put("on", !tv && storedOn(ctx, c));
+                ch.put("on", !tv && !duo && storedOn(ctx, c));
                 ch.put("last_push_at", Store.getLong(ctx, c.lastPushKey, 0));
                 ch.put("last_error", Store.get(ctx, c.lastErrorKey, ""));
                 o.put(c.id, ch);

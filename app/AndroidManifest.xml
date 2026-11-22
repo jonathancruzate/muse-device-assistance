@@ -2,6 +2,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.jonathancruzate.metamusedeviceassistance">
 
+    <!-- v1.31.0 plugin voice endpoint: PluginVoiceService is
+         guarded by this signature-level permission, so only apps
+         signed with the Muse family cert (the plugins) can ask
+         the core to run a voice activation. No open endpoint. -->
+    <permission
+        android:name="com.jonathancruzate.metamusedeviceassistance.permission.PLUGIN_VOICE"
+        android:label="Request Muse Device Assistance voice activations"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="com.jonathancruzate.metamusedeviceassistance.permission.PLUGIN_VOICE" />
+    <!-- v1.31.0: the Duo Companion plugin's command endpoint is
+         guarded by its own signature-level COMMANDS permission;
+         this host holds it by family signature. -->
+    <uses-permission android:name="com.jonathancruzate.metamuseduo.permission.COMMANDS" />
+
     <!-- Muse Phone Bridge: the phone-side control plane that complements
          MacroDroid (investigation 2026-11-01, report
          goals/manage-my-smart-home/hidden_files/custom-app-vs-macrodroid-20261101.md).
@@ -30,6 +44,11 @@
     <!-- Reading other apps' packages for the Phase 0 probe (Routines /
          MacroDroid versions). -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!-- v1.31.0: the Plugins section's Uninstall action fires ACTION_DELETE;
+         the package installer refuses callers without this permission
+         (verified on device 2026-11-22: UninstallerActivity closed itself
+         with "does not have android.permission.REQUEST_DELETE_PACKAGES"). -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <!-- ADB bridge (v1.1): mDNS discovery of the phone's own wireless
          debugging services (_adb-tls-connect / _adb-tls-pairing). -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -217,6 +236,22 @@
              hands the plugin (delivery carries this app's identity, so
              the receiver stays non-exported). -->
         <receiver android:name=".BudsResultReceiver" android:exported="false" />
+
+        <!-- v1.31.0 plugin bus: Duo plugin results, same
+             PendingIntent discipline as BudsResultReceiver. -->
+        <receiver android:name=".DuoResultReceiver" android:exported="false" />
+
+        <!-- v1.31.0: the generic plugin voice endpoint. Exported
+             (plugins are other apps) but the PLUGIN_VOICE
+             signature permission is the gate: the platform
+             refuses starts from any non-family app. -->
+        <service android:name=".PluginVoiceService"
+            android:exported="true"
+            android:permission="com.jonathancruzate.metamusedeviceassistance.permission.PLUGIN_VOICE">
+            <intent-filter>
+                <action android:name="com.jonathancruzate.metamusedeviceassistance.action.PLUGIN_VOICE" />
+            </intent-filter>
+        </service>
 
         <!-- v1.13: Muse Wear Installer status listener — receives
              the watch app's job status messages over the Wearable

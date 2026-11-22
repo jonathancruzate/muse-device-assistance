@@ -3,6 +3,10 @@ package com.jonathancruzate.metamusedeviceassistance;
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.net.nsd.NsdManager;
 import android.net.nsd.NsdServiceInfo;
 import android.net.wifi.WifiManager;
@@ -19,6 +23,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * ADB bridge, v1.1: endpoint discovery + self-heal.
@@ -55,6 +61,14 @@ public final class AdbBridge {
     private static NsdManager nsd;
     private static WifiManager.MulticastLock multicastLock;
     private static boolean discovering = false;
+    // v1.27: Wi-Fi transition watching (NetworkCallback below).
+    private static boolean netCallbackRegistered = false;
+    private static final java.util.concurrent.ExecutorService NET_EXEC =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "adb-net-watch");
+                t.setDaemon(true);
+                return t;
+            });
     private static final List<NsdServiceInfo> resolveQueue = new ArrayList<>();
     private static boolean resolving = false;
     private static final Map<String, JSONObject> endpoints = new HashMap<>();
@@ -146,6 +160,7 @@ public final class AdbBridge {
     // ------------------------------------------------------------- discovery
 
     public static synchronized void startDiscovery(Context ctx) {
+        registerNetworkCallback(ctx.getApplicationContext());
         if (discovering) return;
         final Context app = ctx.getApplicationContext();
         try {
@@ -165,6 +180,73 @@ public final class AdbBridge {
         discover(app, TYPE_CONNECT);
         discover(app, TYPE_PAIRING);
         BridgeLog.log(app, "ADB_DISC", "discovery started (" + TYPE_CONNECT + ", " + TYPE_PAIRING + ")");
+    }
+
+    // ------------------------------------------------- network transitions
+
+    /**
+     * v1.27: watch Wi-Fi transitions (docs/lag-diagnosis-2026-11-18.md).
+     * Through v1.26 the bridge had NO network-transition handling:
+     * leaving home Wi-Fi left a blackholed stored endpoint that
+     * every shell command burned ~130 s discovering, and coming
+     * home reconnected only when some command happened to try.
+     * Now: on Wi-Fi JOIN, clear adb_down, refresh the stored Wi-Fi
+     * IP, and proactively reconnect (two attempts, at +2 s and
+     * +10 s, so mDNS re-discovery can land the fresh endpoint
+     * first; the NSD listeners above run continuously, so a join
+     * re-advertises and re-resolves on its own). On Wi-Fi LOSS,
+     * reap the loopback connection and flag adb_down immediately.
+     * Registered once per process.
+     */
+    private static synchronized void registerNetworkCallback(final Context app) {
+        if (netCallbackRegistered) return;
+        if (DeviceProfile.isTv(app)) return; // TV is wired LAN ADB; no Wi-Fi lane
+        try {
+            ConnectivityManager cm = (ConnectivityManager) app
+                    .getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm == null) return;
+            NetworkRequest req = new NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                    .build();
+            cm.registerNetworkCallback(req, new ConnectivityManager.NetworkCallback() {
+                @Override
+                public void onAvailable(Network network) {
+                    BridgeLog.log(app, "ADB_NET", "wifi available: " + network);
+                    Store.put(app, Store.K_ADB_DOWN, false);
+                    persist(app);
+                    NET_EXEC.execute(() -> {
+                        try { Thread.sleep(2000); } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                        if (LoopbackAdb.ensureConnected(app)) {
+                            BridgeLog.log(app, "ADB_NET",
+                                    "proactive reconnect after wifi join: ok");
+                            return;
+                        }
+                        try { Thread.sleep(8000); } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                        boolean ok = LoopbackAdb.ensureConnected(app);
+                        BridgeLog.log(app, "ADB_NET",
+                                "proactive reconnect after wifi join (retry): ok=" + ok);
+                    });
+                }
+
+                @Override
+                public void onLost(Network network) {
+                    BridgeLog.log(app, "ADB_NET", "wifi lost: " + network);
+                    LoopbackAdb.onNetworkLost(app);
+                    persist(app);
+                }
+            });
+            netCallbackRegistered = true;
+            BridgeLog.log(app, "ADB_NET", "wifi NetworkCallback registered");
+        } catch (Exception e) {
+            BridgeLog.log(app, "ADB_NET", "NetworkCallback register failed: "
+                    + e.getClass().getSimpleName() + " " + e.getMessage());
+        }
     }
 
     private static void discover(final Context app, final String type) {
@@ -330,6 +412,11 @@ public final class AdbBridge {
             o.put("endpoint_at", Store.getLong(ctx, Store.K_ADB_ENDPOINT_AT, 0));
             o.put("pairing_open", Store.getBool(ctx, Store.K_ADB_PAIRING_OPEN, false));
             o.put("wifi_ip", wifiIp(ctx));
+            // v1.27: lane health alongside the endpoint facts, so a
+            // stale endpoint is never mistaken for a live lane.
+            o.put("adb_ready", LoopbackAdb.adbReady(ctx));
+            o.put("adb_down", Store.getBool(ctx, Store.K_ADB_DOWN, false));
+            o.put("adb_connected", LoopbackAdb.isConnected(ctx));
             String eps = Store.get(ctx, Store.K_ADB_ENDPOINTS_JSON, "[]");
             o.put("endpoints", new JSONArray(eps));
         } catch (Exception ignored) {}
