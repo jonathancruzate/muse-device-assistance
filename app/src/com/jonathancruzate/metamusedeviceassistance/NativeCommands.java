@@ -3,6 +3,8 @@ package com.jonathancruzate.metamusedeviceassistance;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.media.AudioManager;
@@ -313,20 +315,94 @@ public final class NativeCommands {
         return s;
     }
 
+    /** Resolver/chooser packages are never a launch target: pinning
+     *  one would just re-show the chooser. */
+    private static boolean isResolverPkg(String pkg) {
+        if (pkg == null) return true;
+        return pkg.equals("android") || pkg.contains("intentresolver")
+                || pkg.contains("resolver");
+    }
+
+    /**
+     * v1.31.1: choose the concrete package a meeting VIEW intent
+     * will be pinned to. Preference: (1) the host's native meeting
+     * app when it actually handles the URL, (2) the system's
+     * default handler when it is a real app (not the resolver),
+     * (3) Chrome, then Samsung Internet, when they handle it,
+     * (4) any other non-resolver handler. Null when nothing
+     * installed resolves the URL at all.
+     */
+    private static String pickLinkTarget(Context ctx, Intent view,
+                                         java.util.Set<String> expected) {
+        PackageManager pm = ctx.getPackageManager();
+        java.util.Set<String> handlers = new java.util.HashSet<>();
+        try {
+            java.util.List<ResolveInfo> ris =
+                    pm.queryIntentActivities(view, 0);
+            if (ris != null) {
+                for (ResolveInfo ri : ris) {
+                    if (ri != null && ri.activityInfo != null
+                            && ri.activityInfo.packageName != null) {
+                        handlers.add(ri.activityInfo.packageName);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        if (handlers.isEmpty()) return null;
+        for (String p : expected) {
+            if (!p.equals(CHROME_PKG) && !p.equals(SBROWSER_PKG)
+                    && handlers.contains(p)) {
+                return p;
+            }
+        }
+        try {
+            ResolveInfo def = pm.resolveActivity(view,
+                    PackageManager.MATCH_DEFAULT_ONLY);
+            if (def != null && def.activityInfo != null) {
+                String dp = def.activityInfo.packageName;
+                if (dp != null && handlers.contains(dp)
+                        && !isResolverPkg(dp)) {
+                    return dp;
+                }
+            }
+        } catch (Exception ignored) {}
+        if (handlers.contains(CHROME_PKG)) return CHROME_PKG;
+        if (handlers.contains(SBROWSER_PKG)) return SBROWSER_PKG;
+        for (String p : handlers) {
+            if (!isResolverPkg(p)) return p;
+        }
+        return null;
+    }
+
     /**
      * v1.28: open a validated meeting join URL (ShellAllowlist
      * checkLinkOpen is the only way in: https, meeting allowlist,
      * no userinfo, <=512 chars) with an ACTION_VIEW intent issued
      * from the accessibility-service context — the nav_open /
-     * app_launch discipline. No package is pinned: the system
-     * resolves the link to the meeting app when installed, else
-     * the default browser. Success is VERIFIED: the live
+     * app_launch discipline. Success is VERIFIED: the live
      * foreground must become one of the host's expected packages
      * (native app or a browser) within ~2.5 s (meeting apps are
-     * slower to foreground than Maps); a chooser/resolver window
-     * is transient and keeps the poll waiting. Non-arrival is the
-     * typed bal_blocked error, never a false ok — and there is NO
-     * shell fallback for this verb (no shell form exists).
+     * slower to foreground than Maps). Non-arrival is the typed
+     * bal_blocked error, never a false ok — and there is NO shell
+     * fallback for this verb (no shell form exists).
+     *
+     * v1.31.1 fix — RESOLVE-THEN-PIN. The v1.28 form fired the
+     * VIEW intent UNPINNED and, on this phone (S24+, Android 16 /
+     * One UI), an unpinned https VIEW from the background never
+     * foregrounds anything while the phone is in active use: the
+     * live proofs of 2026-11-22 (cmd-12383262, cmd-7718d414,
+     * cmd-f38d0c1f) all burned the full verify window with the
+     * foreground parked in Twitter / Gmail, while explicit
+     * package launches (app_launch of Chrome and of the Meet app)
+     * and a pinned-package start foreground reliably, and the
+     * same unpinned link_open "succeeded" only when the target
+     * app was already foreground (cmd-b013a245, 126 ms — the poll
+     * saw the pre-existing foreground, not a launch). So the
+     * intent is now resolved first (pickLinkTarget) and PINNED to
+     * the chosen package — the same explicit-launch shape as
+     * app_launch / nav_open — and the foreground verify accepts
+     * the expected set plus the pinned target. No handler at all
+     * is the typed no_handler error.
      */
     private static LoopbackAdb.Result openLink(Context ctx, String url, long t0) {
         if (url == null || url.isEmpty()) {
@@ -338,6 +414,19 @@ public final class NativeCommands {
         java.util.Set<String> expected = expectedPkgsForHost(host);
         Intent view = new Intent(Intent.ACTION_VIEW, uri);
         view.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        String target = pickLinkTarget(ctx, view, expected);
+        if (target == null) {
+            BridgeLog.log(ctx, "SHELL", "link_open no handler: host=" + host);
+            return new LoopbackAdb.Result(false, "",
+                    System.currentTimeMillis() - t0,
+                    "no_handler: no installed app resolves https://"
+                            + host + " (needs the meeting app or a browser)");
+        }
+        view.setPackage(target);
+        java.util.Set<String> verify = new java.util.HashSet<>(expected);
+        verify.add(target);
+        BridgeLog.log(ctx, "SHELL", "link_open launch host=" + host
+                + " via=" + target);
         VoiceAccessibilityService svc = VoiceAccessibilityService.instance;
         Context launchCtx = svc != null ? svc : ctx;
         try {
@@ -359,14 +448,15 @@ public final class NativeCommands {
         long deadline = System.currentTimeMillis() + 2500;
         while (System.currentTimeMillis() < deadline) {
             lastFg = foregroundNow();
-            if (lastFg != null && expected.contains(lastFg)) {
+            if (lastFg != null && verify.contains(lastFg)) {
                 Store.put(ctx, Store.K_FG_PACKAGE, lastFg);
                 Store.put(ctx, Store.K_FG_AT, System.currentTimeMillis());
                 BridgeLog.log(ctx, "SHELL", "link_open verified host=" + host
-                        + " foreground=" + lastFg + " in "
+                        + " via=" + target + " foreground=" + lastFg + " in "
                         + (System.currentTimeMillis() - t0) + "ms");
                 return new LoopbackAdb.Result(true,
-                        "foreground=" + lastFg + " host=" + host,
+                        "foreground=" + lastFg + " host=" + host
+                                + " via=" + target,
                         System.currentTimeMillis() - t0, null);
             }
             try { Thread.sleep(150); } catch (InterruptedException e) {
@@ -375,11 +465,13 @@ public final class NativeCommands {
             }
         }
         BridgeLog.log(ctx, "SHELL", "link_open NOT verified: host=" + host
-                + " foreground=" + lastFg + " expected one of " + expected);
+                + " via=" + target + " foreground=" + lastFg
+                + " expected one of " + verify);
         return new LoopbackAdb.Result(false, "",
                 System.currentTimeMillis() - t0,
                 "bal_blocked: foreground did not become a meeting app/browser"
-                        + " for " + host + " (stayed " + lastFg + ")");
+                        + " for " + host + " via " + target
+                        + " (stayed " + lastFg + ")");
     }
 
     /**

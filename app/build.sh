@@ -15,8 +15,8 @@ BT="$SDK/build-tools/35.0.0"
 ANDROID_JAR="$SDK/platforms/android-35/android.jar"
 KS="keystore/musephonebridge.keystore"
 KS_PASS_FILE="keystore/keystore-password.txt"
-VERSION_CODE=45
-VERSION_NAME="1.31.0"
+VERSION_CODE=46
+VERSION_NAME="1.31.1"
 PKG_PATH="com/jonathancruzate/metamusedeviceassistance"
 
 rm -rf build
