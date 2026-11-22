@@ -74,6 +74,22 @@
          refuses typed. Sideloaded owner-device app; no Play
          policy surface. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!-- v1.30 voicemail module: ADD_VOICEMAIL is the floor to talk to
+         the voicemail provider. READ/WRITE_VOICEMAIL are
+         signature|privileged|role and only become effective while
+         this app holds ROLE_DIALER. CALL_PHONE and SEND_SMS support
+         the dialer qualification components below. READ_PHONE_STATE
+         and READ_CONTACTS are already declared above. ROLE_DIALER
+         qualification only matters when the Voicemail module is
+         enabled in-app; the module NEVER requests or holds the role
+         permanently, borrow-and-hand-back only, exactly as the
+         standalone Muse Voicemail app worked. -->
+    <uses-permission android:name="com.android.voicemail.permission.ADD_VOICEMAIL" />
+    <uses-permission android:name="com.android.voicemail.permission.READ_VOICEMAIL" />
+    <uses-permission android:name="com.android.voicemail.permission.WRITE_VOICEMAIL" />
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <!-- v1.12: the v1.7 Health Connect channel and its framework HC
          permission declarations (health.READ_SLEEP/STEPS/HEART_RATE/
          EXERCISE) are REMOVED — health data is owned by the Muse
@@ -94,6 +110,7 @@
     <application
         android:label="Muse Device Assistance"
         android:extractNativeLibs="true"
+        android:banner="@drawable/tv_banner"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="false"
@@ -107,7 +124,14 @@
         <meta-data android:name="com.google.android.gms.version"
             android:value="@integer/google_play_services_version" />
 
-        <activity android:name=".MainActivity" android:exported="true">
+        <!-- v1.30.2: android:banner (here and on <application>) is the
+             Android TV launcher banner (320x180, res/drawable +
+             drawable-xhdpi tv_banner.png, "Muse DA" art from the
+             muse-app-logos banner set). LEANBACK_LAUNCHER below has
+             been declared since the v1.5.0 TV profile; the banner is
+             what was missing for the Shield TV apps row. -->
+        <activity android:name=".MainActivity" android:exported="true"
+            android:banner="@drawable/tv_banner">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -203,6 +227,65 @@
                 <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
                 <data android:scheme="wear" android:host="*"
                     android:pathPrefix="/muse-wear-installer" />
+            </intent-filter>
+        </service>
+
+        <!-- v1.30 voicemail module: headless export for the ADB
+             automation lane (voicemail-borrow.sh). Writes
+             Download/MuseVoicemailExport.txt and finishes. When
+             the module is disabled it writes status MODULE_DISABLED. -->
+        <activity android:name=".VoicemailExportActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- v1.30 voicemail module: ROLE_DIALER qualification
+             components. They exist so the borrow in
+             voicemail-borrow.sh can hold the dialer role briefly
+             and hand it straight back. v1.30.1 (DEC-0017 condition
+             1): while the module is disabled, VoicemailModule
+             disables these components at the PackageManager level
+             on every app and service start, so the app does not
+             sit dialer-eligible from the manifest alone. The
+             export activity is not gated: it answers
+             MODULE_DISABLED when the module is off. -->
+        <activity android:name=".VoicemailDialActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="tel" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tel" />
+            </intent-filter>
+        </activity>
+
+        <activity android:name=".VoicemailInCallActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:excludeFromRecents="true" />
+
+        <service android:name=".VoicemailInCallService"
+            android:permission="android.permission.BIND_INCALL_SERVICE"
+            android:exported="true">
+            <meta-data android:name="android.telecom.IN_CALL_SERVICE_UI" android:value="true" />
+            <intent-filter>
+                <action android:name="android.telecom.InCallService" />
+            </intent-filter>
+        </service>
+
+        <service android:name=".VoicemailVvmService"
+            android:permission="android.permission.BIND_VISUAL_VOICEMAIL_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.telephony.VisualVoicemailService" />
             </intent-filter>
         </service>
 

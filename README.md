@@ -70,3 +70,9 @@ to the regenerated clean set), apksigner verify passed in build. APK:
 app/Muse-Device-Assistance-1.30.1.apk, SHA-256 `4fe9c85a6fb56fd5663406ae788cceb8081bbb7299f4a1f6113648e01bb3197a` (file re-signed at
 03:46 by a parallel handling at identical size/version/icon; this is the
 current on-disk hash). Not installed by this handling; ready to install.
+
+## v1.30.2 (2026-11-21) — Android TV banner, installed on the Shield TV
+
+- **TV banner added** (Jonathan order, same night as the other Muse TV banners): `android:banner` on the application + MainActivity, art in `res/drawable/tv_banner.png` + `res/drawable-xhdpi/tv_banner.png` (320x180). House style: Muse M + orange phone badge, text reads **"Muse DA"** (shortened at his order so the type matches the other banners; the app name is unchanged). `LEANBACK_LAUNCHER` was already declared since the v1.5.0 TV profile, so no intent changes; phone behavior unchanged, no code changes.
+- Built via `app/build.sh`, all guards green; banner extracted from the built APK is pixel-identical to the approved export (0 differing px, both densities); apksigner family cert `4dcb45fa...` unchanged. APK `Muse-Device-Assistance-1.30.2.apk`, SHA-256 `383140e2908b9e21b3287e1dcf37ec0759af990d7f2cad00e94e2fa122e94d77`.
+- **Installed on the Shield TV** (`adb install -r` over v1.22.0): read-back 1.30.2 / vc43; installed base.apk hash-identical to the staged APK; leanback intent resolves; BridgeService live on the TV. Visual proof: Projectivy All apps renders "Muse Device Assistance" with the new "Muse DA" banner (`docs/v1.30.2-tv-banner-2026-11-21.md`, screenshot `docs/v1.30.2-tv-allapps-proof.png`). Not installed on the phone (its 1.30.1 install is owned by the parallel handling).
