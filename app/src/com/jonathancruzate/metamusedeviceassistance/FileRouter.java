@@ -83,9 +83,24 @@ public final class FileRouter {
                 case "files_list": {
                     r = requireAccess(t0);
                     if (r == null) {
+                        // Gate shape (v1.36): {folder, offset, segment...}
                         int offset = args.length > 1 && !args[1].isEmpty()
                                 ? Integer.parseInt(args[1]) : 0;
-                        r = ok(list(args[0], offset), t0);
+                        String[] segs = args.length > 2
+                                ? Arrays.copyOfRange(args, 2, args.length)
+                                : new String[0];
+                        r = list(args[0], segs, offset, t0);
+                    }
+                    break;
+                }
+                case "files_get": {
+                    r = requireAccess(t0);
+                    if (r == null) {
+                        // Gate shape (v1.36): {folder, name, segment...}
+                        String[] segs = args.length > 2
+                                ? Arrays.copyOfRange(args, 2, args.length)
+                                : new String[0];
+                        r = get(ctx, args[0], segs, args[1], t0);
                     }
                     break;
                 }
@@ -216,11 +231,53 @@ public final class FileRouter {
         return s;
     }
 
-    private static String list(String token, int offset) {
-        File dir = new File(FilePlan.folderPath(token));
-        if (!dir.isDirectory()) return "files_list folder=" + token + " missing";
+    /** Resolve base + gate-validated segments to a directory,
+     *  re-validating on-device and canonical-checking containment:
+     *  the resolved canonical path must stay inside the mapped base
+     *  folder, so a symlink planted inside a public folder cannot
+     *  walk the listing (or a fetch) outside it. Returns null when
+     *  the chain is invalid or escapes. */
+    private static File resolveDir(String token, String[] segs) {
+        String path = FilePlan.subPath(token, segs);
+        if (path == null) return null;
+        try {
+            File base = new File(FilePlan.folderPath(token));
+            File dir = new File(path);
+            String baseCanon = base.getCanonicalPath();
+            String canon = dir.getCanonicalPath();
+            if (!canon.equals(baseCanon)
+                    && !canon.startsWith(baseCanon + File.separator)) {
+                return null;
+            }
+            return dir;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String subLabel(String[] segs) {
+        if (segs == null || segs.length == 0) return "";
+        StringBuilder sb = new StringBuilder();
+        for (String s : segs) {
+            if (sb.length() > 0) sb.append('/');
+            sb.append(FilePlan.sanitizeForOutput(s));
+        }
+        return sb.toString();
+    }
+
+    private static LoopbackAdb.Result list(String token, String[] segs,
+                                           int offset, long t0) {
+        File dir = resolveDir(token, segs);
+        if (dir == null) {
+            return new LoopbackAdb.Result(false, "", ms(t0), "bad_subfolder_path");
+        }
+        String sub = subLabel(segs);
+        String where = "folder=" + token + (sub.isEmpty() ? "" : " sub=" + sub);
+        if (!dir.isDirectory()) {
+            return ok("files_list " + where + " missing", t0);
+        }
         File[] kids = dir.listFiles();
-        if (kids == null) return "files_list folder=" + token + " unreadable";
+        if (kids == null) return ok("files_list " + where + " unreadable", t0);
         Arrays.sort(kids, new Comparator<File>() {
             @Override
             public int compare(File a, File b) {
@@ -230,7 +287,7 @@ public final class FileRouter {
         StringBuilder sb = new StringBuilder();
         int from = Math.min(offset, kids.length);
         int to = Math.min(from + LIST_PAGE, kids.length);
-        sb.append("files_list folder=").append(token)
+        sb.append("files_list ").append(where)
                 .append(" total=").append(kids.length)
                 .append(" showing=").append(from).append("..").append(to)
                 .append('\n');
@@ -243,9 +300,76 @@ public final class FileRouter {
                     .append('\n');
         }
         if (to < kids.length) {
-            sb.append("more: files_list ").append(token).append(' ').append(to).append('\n');
+            sb.append("more: files_list ").append(token);
+            if (segs.length > 0) {
+                sb.append(" ::");
+                for (String s : segs) sb.append(' ').append(s);
+            }
+            sb.append(' ').append(to).append('\n');
         }
-        return sb.toString().trim();
+        return ok(sb.toString().trim(), t0);
+    }
+
+    /** v1.36 files_get: fetch ONE image file to Muse through the
+     *  relay. Typed refusals, never silent degradation: the file is
+     *  delivered byte-identical or not at all, and the reported
+     *  sha256 is the original file's, so the receiver verifies the
+     *  delivered bytes against it. */
+    private static LoopbackAdb.Result get(Context ctx, String token,
+                                          String[] segs, String name, long t0)
+            throws Exception {
+        if (!FilePlan.imageExtOk(name)) {
+            return new LoopbackAdb.Result(false, "", ms(t0),
+                    "not_an_image: files_get fetches images only");
+        }
+        File dir = resolveDir(token, segs);
+        if (dir == null) {
+            return new LoopbackAdb.Result(false, "", ms(t0), "bad_subfolder_path");
+        }
+        File f = new File(dir, name);
+        if (!f.isFile()) {
+            return new LoopbackAdb.Result(false, "", ms(t0), "not_a_file");
+        }
+        long size = f.length();
+        if (size > FilePlan.FETCH_MAX_BYTES) {
+            return new LoopbackAdb.Result(false, "", ms(t0),
+                    "files_too_large: " + size + " bytes exceeds the "
+                            + FilePlan.FETCH_MAX_BYTES + " byte fetch cap");
+        }
+        if (size == 0) {
+            return new LoopbackAdb.Result(false, "", ms(t0), "empty_file");
+        }
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        byte[] data = new byte[(int) size];
+        int off = 0;
+        try (FileInputStream in = new FileInputStream(f)) {
+            int n;
+            while ((n = in.read(data, off, data.length - off)) != -1) {
+                md.update(data, off, n);
+                off += n;
+                if (off >= data.length) break;
+            }
+        }
+        if (off != data.length) {
+            return new LoopbackAdb.Result(false, "", ms(t0),
+                    "read_failed: file changed size while reading");
+        }
+        String sha = WearProtocol.toHex(md.digest());
+        String ext = FilePlan.extensionOf(name);
+        String sub = subLabel(segs);
+        boolean uploaded = FileFetchTransport.postFetch(
+                ctx, token, sub, name, ext, size, sha, data);
+        if (!uploaded) {
+            return new LoopbackAdb.Result(false, "", ms(t0),
+                    "files_upload_failed: the relay did not accept the fetch");
+        }
+        String out = "files_get folder=" + token
+                + (sub.isEmpty() ? "" : " sub=" + sub)
+                + " size=" + size
+                + " sha256=" + sha
+                + " ref=files/fetch.bin"
+                + " name=" + FilePlan.sanitizeForOutput(name);
+        return ok(out, t0);
     }
 
     private static LoopbackAdb.Result hash(String token, String name, long t0)

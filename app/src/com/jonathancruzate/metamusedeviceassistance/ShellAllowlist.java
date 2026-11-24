@@ -210,7 +210,8 @@ public final class ShellAllowlist {
             // by the dedicated checkFiles() validator.
             "files_access",    // args: none -> access state + folder presence
             "files_summary",   // args: none -> per-folder counts/bytes/newest
-            "files_list",      // args: <folder> [offset] -> one page, newest first
+            "files_list",      // args: <folder> [offset] | <folder> :: <segment...> [offset] -> one page, newest first (v1.36 subfolders)
+            "files_get",       // args: <folder> [segment... ::] <name...> -> fetch one image via the relay (v1.36)
             "files_hash",      // args: <folder> <name...> -> sha256 of one file
             "files_move",      // args: <folder> <dest-folder> <name...>
             "files_trash",     // args: <folder> <name...> -> move to .muse-trash
@@ -893,9 +894,53 @@ public final class ShellAllowlist {
                 return new NativeGate(true, template, null, null,
                         new String[]{args.get(0)});
             case "files_list": {
-                if (args.size() < 1 || args.size() > 2
-                        || !FilePlan.folderOk(args.get(0))) {
-                    return nRefuse("needs <folder> [offset]");
+                // v1.24 shape, unchanged: <folder> [offset].
+                // v1.36 subfolder shape: <folder> :: <segment...>
+                // [offset]. The "::" marker is what switches shapes,
+                // so the legacy contract survives exactly: without
+                // it, a non-numeric second arg is still a bad offset,
+                // never a surprise subfolder. Each segment is ONE
+                // argv element (quoted by the caller when it
+                // contains spaces). Inside the :: section a trailing
+                // numeric arg is the offset only when at least one
+                // segment precedes it, so a numeric-only subfolder
+                // name works bare (files_list dcim :: 2024) and with
+                // an explicit offset (files_list dcim :: 2024 0).
+                // Gate output shape: {folder, offset, segment...}.
+                if (args.size() < 1 || !FilePlan.folderOk(args.get(0))) {
+                    return nRefuse("needs <folder> [offset] or <folder> :: <segment...> [offset]");
+                }
+                if (args.size() >= 2 && "::".equals(args.get(1))) {
+                    List<String> segArgs = new ArrayList<>(
+                            args.subList(2, args.size()));
+                    if (segArgs.isEmpty()) {
+                        return nRefuse("needs a subfolder segment after ::");
+                    }
+                    String offset = "";
+                    if (segArgs.size() >= 2
+                            && ok(FILE_OFFSET, segArgs.get(segArgs.size() - 1))) {
+                        offset = segArgs.remove(segArgs.size() - 1);
+                    }
+                    if (segArgs.size() > FilePlan.MAX_SUB_DEPTH) {
+                        return nRefuse("subfolder chain too deep");
+                    }
+                    String[] out = new String[2 + segArgs.size()];
+                    out[0] = args.get(0);
+                    out[1] = offset;
+                    for (int i = 0; i < segArgs.size(); i++) {
+                        if (!FilePlan.segmentOk(segArgs.get(i))) {
+                            return nRefuse("bad subfolder segment");
+                        }
+                        out[2 + i] = segArgs.get(i);
+                    }
+                    if (FilePlan.subPath(out[0],
+                            Arrays.copyOfRange(out, 2, out.length)) == null) {
+                        return nRefuse("bad subfolder path");
+                    }
+                    return new NativeGate(true, template, null, null, out);
+                }
+                if (args.size() > 2) {
+                    return nRefuse("needs <folder> [offset] or <folder> :: <segment...> [offset]");
                 }
                 String offset = "";
                 if (args.size() == 2) {
@@ -906,6 +951,54 @@ public final class ShellAllowlist {
                 }
                 return new NativeGate(true, template, null, null,
                         new String[]{args.get(0), offset});
+            }
+            case "files_get": {
+                // v1.36: <folder> [segment... ::] <name...>. The "::"
+                // separator arg splits subfolder segments (one argv
+                // element each) from the file name (word args joined,
+                // the joinName pattern). Without "::", every arg
+                // after the folder is the name and the file sits in
+                // the folder root. Images only: the gate refuses a
+                // name whose extension is not an image extension;
+                // the router re-checks type, existence, and the size
+                // cap, and the relay re-checks magic bytes + sha256.
+                // Gate output shape: {folder, name, segment...}.
+                if (args.size() < 2 || !FilePlan.folderOk(args.get(0))) {
+                    return nRefuse("needs <folder> [segment... ::] <name...>");
+                }
+                int sep = -1;
+                for (int i = 1; i < args.size(); i++) {
+                    if ("::".equals(args.get(i))) { sep = i; break; }
+                }
+                List<String> segArgs = sep < 0
+                        ? new ArrayList<String>()
+                        : args.subList(1, sep);
+                int nameFrom = sep < 0 ? 1 : sep + 1;
+                if (args.size() - nameFrom < 1) {
+                    return nRefuse("needs a file name after ::");
+                }
+                if (segArgs.size() > FilePlan.MAX_SUB_DEPTH) {
+                    return nRefuse("subfolder chain too deep");
+                }
+                for (String s : segArgs) {
+                    if (!FilePlan.segmentOk(s)) {
+                        return nRefuse("bad subfolder segment");
+                    }
+                }
+                String name = joinName(args, nameFrom);
+                if (name == null) return nRefuse("bad file name");
+                if (!FilePlan.imageExtOk(name)) {
+                    return nRefuse("not_an_image: files_get fetches images only");
+                }
+                String[] segs = segArgs.toArray(new String[0]);
+                if (FilePlan.subPath(args.get(0), segs) == null) {
+                    return nRefuse("bad subfolder path");
+                }
+                String[] out = new String[2 + segs.length];
+                out[0] = args.get(0);
+                out[1] = name;
+                System.arraycopy(segs, 0, out, 2, segs.length);
+                return new NativeGate(true, template, null, null, out);
             }
             case "files_hash":
             case "files_trash": {

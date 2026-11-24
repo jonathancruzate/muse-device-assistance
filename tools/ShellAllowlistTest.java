@@ -273,6 +273,105 @@ public class ShellAllowlistTest {
     expect(ShellAllowlist.checkNative("files_organize", List.of("download")).allowed, "files_organize download");
     expect(!ShellAllowlist.checkNative("files_organize", List.of()).allowed, "files_organize no args refused");
     expect(!ShellAllowlist.checkNative("files_rm", List.of("download", "x.pdf")).allowed, "files_rm unknown refused (no delete template exists)");
+
+    // ---- v1.36: files_list subfolders + files_get fetch ----
+    expect(ShellAllowlist.isNativeTemplate("files_get"), "files_get is native template");
+    ShellAllowlist.NativeGate fSub = ShellAllowlist.checkNative("files_list",
+            Arrays.asList("pictures", "::", "Instagram"));
+    expect(fSub.allowed && fSub.args != null && fSub.args.length == 3
+            && "pictures".equals(fSub.args[0]) && "".equals(fSub.args[1])
+            && "Instagram".equals(fSub.args[2]), "files_list one subfolder");
+    ShellAllowlist.NativeGate fSub2 = ShellAllowlist.checkNative("files_list",
+            Arrays.asList("dcim", "::", "Camera", "RAW", "40"));
+    expect(fSub2.allowed && fSub2.args.length == 4 && "40".equals(fSub2.args[1])
+            && "Camera".equals(fSub2.args[2]) && "RAW".equals(fSub2.args[3]),
+            "files_list nested subfolders with offset");
+    ShellAllowlist.NativeGate fSubNum = ShellAllowlist.checkNative("files_list",
+            Arrays.asList("dcim", "::", "2024", "0"));
+    expect(fSubNum.allowed && fSubNum.args.length == 3 && "2024".equals(fSubNum.args[2])
+            && "0".equals(fSubNum.args[1]), "files_list numeric subfolder with explicit offset");
+    ShellAllowlist.NativeGate fSubNumBare = ShellAllowlist.checkNative("files_list",
+            Arrays.asList("dcim", "::", "2024"));
+    expect(fSubNumBare.allowed && fSubNumBare.args.length == 3
+            && "2024".equals(fSubNumBare.args[2]) && "".equals(fSubNumBare.args[1]),
+            "files_list numeric subfolder bare");
+    expect(!ShellAllowlist.checkNative("files_list", List.of("pictures", "Instagram")).allowed,
+            "files_list bare segment refused (needs :: marker)");
+    expect(!ShellAllowlist.checkNative("files_list", List.of("pictures", "::")).allowed,
+            "files_list :: without segment refused");
+    expect(!ShellAllowlist.checkNative("files_list",
+            Arrays.asList("pictures", "::", "..")).allowed,
+            "files_list parent-ref segment refused");
+    expect(!ShellAllowlist.checkNative("files_list",
+            Arrays.asList("pictures", "::", "../DCIM")).allowed,
+            "files_list traversal segment refused");
+    expect(!ShellAllowlist.checkNative("files_list",
+            Arrays.asList("pictures", "::", "a/b")).allowed,
+            "files_list separator segment refused");
+    expect(!ShellAllowlist.checkNative("files_list",
+            Arrays.asList("pictures", "::", ".thumbnails")).allowed,
+            "files_list dotfile segment refused");
+    expect(!ShellAllowlist.checkNative("files_list",
+            Arrays.asList("pictures", "::", "/storage/emulated/0/DCIM")).allowed,
+            "files_list absolute-path segment refused");
+    expect(!ShellAllowlist.checkNative("files_list",
+            Arrays.asList("pictures", "::", "a", "b", "c", "d", "e")).allowed,
+            "files_list depth 5 refused");
+    expect(ShellAllowlist.checkNative("files_list",
+            Arrays.asList("pictures", "::", "a", "b", "c", "d")).allowed,
+            "files_list depth 4 allowed");
+    ShellAllowlist.NativeGate fGet = ShellAllowlist.checkNative("files_get",
+            List.of("pictures", "statsfm-share-1773774140659.png"));
+    expect(fGet.allowed && fGet.args != null && fGet.args.length == 2
+            && "statsfm-share-1773774140659.png".equals(fGet.args[1]), "files_get root image");
+    ShellAllowlist.NativeGate fGetSub = ShellAllowlist.checkNative("files_get",
+            Arrays.asList("pictures", "Instagram", "::", "my", "photo.jpg"));
+    expect(fGetSub.allowed && fGetSub.args.length == 3
+            && "my photo.jpg".equals(fGetSub.args[1])
+            && "Instagram".equals(fGetSub.args[2]), "files_get subfolder + joined name");
+    ShellAllowlist.NativeGate fGetDeep = ShellAllowlist.checkNative("files_get",
+            Arrays.asList("dcim", "Camera", "RAW", "::", "IMG_0001.webp"));
+    expect(fGetDeep.allowed && fGetDeep.args.length == 4
+            && "RAW".equals(fGetDeep.args[3]), "files_get nested subfolders");
+    expect(!ShellAllowlist.checkNative("files_get", List.of("download", "report.pdf")).allowed,
+            "files_get pdf refused (not an image)");
+    expect(!ShellAllowlist.checkNative("files_get", List.of("download", "notes.txt")).allowed,
+            "files_get txt refused (not an image)");
+    expect(!ShellAllowlist.checkNative("files_get", List.of("pictures", "clip.mp4")).allowed,
+            "files_get video refused (not a still image)");
+    expect(!ShellAllowlist.checkNative("files_get",
+            Arrays.asList("pictures", "..", "::", "x.png")).allowed,
+            "files_get traversal segment refused");
+    expect(!ShellAllowlist.checkNative("files_get",
+            Arrays.asList("pictures", "a/b", "::", "x.png")).allowed,
+            "files_get separator segment refused");
+    expect(!ShellAllowlist.checkNative("files_get",
+            Arrays.asList("pictures", "::", "../x.png")).allowed,
+            "files_get parent-ref name refused");
+    expect(!ShellAllowlist.checkNative("files_get",
+            Arrays.asList("pictures", ".hidden.png")).allowed,
+            "files_get dotfile name refused");
+    expect(!ShellAllowlist.checkNative("files_get",
+            Arrays.asList("pictures", "Instagram", "::")).allowed,
+            "files_get separator without name refused");
+    expect(!ShellAllowlist.checkNative("files_get", List.of("pictures")).allowed,
+            "files_get no name refused");
+    expect(!ShellAllowlist.checkNative("files_get", List.of("secrets", "x.png")).allowed,
+            "files_get bad folder refused");
+    expect(com.jonathancruzate.metamusedeviceassistance.FilePlan.imageExtOk("a.JPG"),
+            "FilePlan imageExtOk case-insensitive");
+    expect(!com.jonathancruzate.metamusedeviceassistance.FilePlan.imageExtOk("a.heic"),
+            "FilePlan imageExtOk heic refused");
+    expect("/storage/emulated/0/Pictures/Instagram".equals(
+            com.jonathancruzate.metamusedeviceassistance.FilePlan.subPath(
+                    "pictures", new String[]{"Instagram"})),
+            "FilePlan subPath resolves inside base");
+    expect(com.jonathancruzate.metamusedeviceassistance.FilePlan.subPath(
+            "pictures", new String[]{".."}) == null,
+            "FilePlan subPath traversal null");
+    expect(com.jonathancruzate.metamusedeviceassistance.FilePlan.subPath(
+            "pictures", new String[]{"a", "b", "c", "d", "e"}) == null,
+            "FilePlan subPath depth null");
     // FilePlan filing rules, exercised directly.
     expect("Images".equals(com.jonathancruzate.metamusedeviceassistance.FilePlan.categoryFor("photo.JPG")), "category jpg -> Images");
     expect("Documents".equals(com.jonathancruzate.metamusedeviceassistance.FilePlan.categoryFor("report.pdf")), "category pdf -> Documents");

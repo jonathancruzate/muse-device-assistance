@@ -141,6 +141,66 @@ public final class FilePlan {
         return true;
     }
 
+    // ---- v1.36: subfolder navigation + image fetch -----------------------
+
+    /** Deepest subfolder chain a files_list / files_get command may
+     *  name below a mapped base folder. Real app libraries nest one
+     *  or two levels (Pictures/Instagram, DCIM/Camera); four is
+     *  generous headroom without opening arbitrary tree walks. */
+    public static final int MAX_SUB_DEPTH = 4;
+
+    /** A subfolder segment obeys exactly the direct-child name
+     *  rules: no separators, no parent references, no dotfiles, no
+     *  control characters. A segment is ONE argv element (quote it
+     *  on the command line when it contains spaces, e.g.
+     *  "Clipped images"); it is consumed as a typed value by
+     *  FileRouter via java.io.File, never as shell text. */
+    public static boolean segmentOk(String segment) {
+        return nameOk(segment);
+    }
+
+    /** Absolute path of base folder + validated segments, or null
+     *  when the folder token is unknown, the chain is too deep, or
+     *  any segment fails segmentOk. The result is built only from
+     *  the code-mapped base plus validated segments, so it cannot
+     *  escape the base; FileRouter additionally canonical-checks
+     *  containment on-device (symlink defense in depth). */
+    public static String subPath(String token, String[] segments) {
+        String base = folderPath(token);
+        if (base == null) return null;
+        if (segments == null) return base;
+        if (segments.length > MAX_SUB_DEPTH) return null;
+        StringBuilder sb = new StringBuilder(base);
+        for (String s : segments) {
+            if (!segmentOk(s)) return null;
+            sb.append('/').append(s);
+        }
+        return sb.toString();
+    }
+
+    /** Extensions files_get may fetch: still images only. The
+     *  router re-checks this on-device and the relay re-checks the
+     *  magic bytes, so the extension is a gate, not the proof. */
+    private static final String[] IMAGE_EXTS = {
+            "jpg", "jpeg", "png", "webp", "gif"};
+
+    public static boolean imageExtOk(String name) {
+        String ext = extensionOf(name);
+        for (String e : IMAGE_EXTS) if (e.equals(ext)) return true;
+        return false;
+    }
+
+    /** Hard cap for one files_get fetch, in bytes of the ORIGINAL
+     *  file. The fetch rides base64-in-JSON to the device relay
+     *  (the screen-frame discipline), whose request body cap is
+     *  4 MB; base64 inflates by a third, so a 2.5 MB original is
+     *  the largest payload that fits with room for the JSON shell.
+     *  Above the cap the router refuses typed (files_too_large);
+     *  nothing is downscaled or truncated, so the SHA-256 the
+     *  command reports is always the original file's hash and the
+     *  receiver can verify the delivered bytes against it. */
+    public static final long FETCH_MAX_BYTES = 2_500_000L;
+
     /** Make a file name safe for one-line result output: path /
      *  table separators and line breaks become spaces. The name on
      *  disk is never changed by this — output hygiene only. */
