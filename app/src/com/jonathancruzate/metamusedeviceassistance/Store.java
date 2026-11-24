@@ -90,6 +90,16 @@ public final class Store {
     public static final String K_LC_WINDOW_COUNT = "lc_window_count";
 
     // v1.5 extension pack — native (on-device) commands.
+    // Routine firing (v1.35) — last routine_fire attempt's
+    // bookkeeping, mirrored by RoutineFirer and carried in the
+    // report's routine_fire.last_fire object. The per-key link
+    // intents/names themselves live under rf_link_<key> /
+    // rf_link_name_<key> prefs owned by RoutineFirer (the registry
+    // is code, not prefs schema).
+    public static final String K_RF_LAST_KEY = "rf_last_key";
+    public static final String K_RF_LAST_AT = "rf_last_at";
+    public static final String K_RF_LAST_RESULT = "rf_last_result";
+
     public static final String K_TORCH_ON = "torch_on";       // last torch state from the CameraManager callback
     public static final String K_TORCH_AT = "torch_at";       // epoch ms of the last torch callback / set
     // v1.27: foreground cache — the accessibility service records
@@ -147,7 +157,6 @@ public final class Store {
     public static final String K_PUSH_MESSAGES = "push_messages";           // default false
     public static final String K_PUSH_DIALER = "push_dialer";               // default false
     public static final String K_PUSH_CALL_LOG = "push_call_log";           // default false
-    public static final String K_PUSH_BATTERY = "push_battery";             // default false
     public static final String K_PUSH_MODE_RECONCILE = "push_mode_reconcile"; // default true
 
     // Per-channel bookkeeping: cursor (last id/ts the channel
@@ -171,15 +180,9 @@ public final class Store {
     public static final String K_PUSH_CALL_LOG_CURSOR = "push_call_log_cursor";
     public static final String K_PUSH_CALL_LOG_LAST_PUSH = "push_call_log_last_push";
     public static final String K_PUSH_CALL_LOG_LAST_ERROR = "push_call_log_last_error";
-    public static final String K_PUSH_BATTERY_CURSOR = "push_battery_cursor";
-    public static final String K_PUSH_BATTERY_LAST_PUSH = "push_battery_last_push";
-    public static final String K_PUSH_BATTERY_LAST_ERROR = "push_battery_last_error";
     public static final String K_PUSH_MODE_RECONCILE_CURSOR = "push_mode_reconcile_cursor";
     public static final String K_PUSH_MODE_RECONCILE_LAST_PUSH = "push_mode_reconcile_last_push";
     public static final String K_PUSH_MODE_RECONCILE_LAST_ERROR = "push_mode_reconcile_last_error";
-    // Low Battery latch: true once the 20% downward crossing has been
-    // pushed; re-arms when battery rises above 25%.
-    public static final String K_PUSH_BATTERY_LATCHED = "push_battery_latched";
     // PushClient retry queue: a JSON array string of failed payloads
     // ({source, ts, items}) kept in prefs; see PushClient.
     public static final String K_PUSH_QUEUE = "push_queue";

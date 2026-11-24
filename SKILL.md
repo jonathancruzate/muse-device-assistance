@@ -1490,11 +1490,13 @@ channel**.
     main-profile listener: the per-user limit still binds the
     paired-device catalog (`notifications.get` sees user 0 only),
     but the push lane covers both WhatsApp accounts.
-  - *Low Battery* (`phone-battery`): `BatteryPush` on the 60-s
-    cycle — the 20% downward crossing latches and pushes
-    `{battery, charging, wifi_ssid, ringer_mode, screen_on}` (the
-    MacroDroid status-POST fields); re-arms above 25%. Replaces
-    the Low Battery Alert macro.
+  - *Low Battery* (`phone-battery`): **REMOVED in v1.33.0
+    (2026-11-23, Jonathan's order)** — was `BatteryPush` on the
+    60-s cycle (the 20% downward crossing latched and pushed the
+    MacroDroid status-POST fields; re-armed above 25%; replaced
+    the Low Battery Alert macro). Channel, check, toggle, and
+    Store keys are deleted from the app, not just off; battery
+    decisions belong solely to the dynamic battery guardian.
 - **LIVE observers since v1.7.0** (record:
   `docs/v1.7-push-observers-2026-11-09.md`) — real code behind the
   toggles. **Channel state (confirmed 2026-11-09): Jonathan turned
@@ -2586,3 +2588,17 @@ voice-state.json carried over with watermarks intact).
 - **Build**: versionCode 46 / 1.31.1; gate suite **269 PASS, ALL_PASS** (gate unchanged); APK 6,286,221 bytes, SHA-256 `368d5b690f85ce121f3e8cf0cb40f0cbea8080f23ded2dd5ca26cb71f52d9dd6`, family cert unchanged.
 - **Install state**: PHONE — staged at `~/da-update-serve/` on the box, `self_update` cmd-a95e2a7f-c645-4ea5-8429-fd15fa9c584e, relay report of 2026-11-22T18:57:53Z reads `self_update {1.31.1, code 46, stage installed}` (phone v1.30.1 → v1.31.1, no hands on it). Side effect to know: this also brought the phone onto the v1.31 slimmed-core line (the Duo plugin duties stay Duo-gated; nothing Duo activates on the phone). Duo and Shield unchanged.
 - **Live proof (2026-11-22 ~14:00 EST)**: three `link_open https://meet.google.com/` runs, each read back after settling — cmd-4eaa434b ok, fg=Chrome via=tachyon, 334 ms (weak form: Chrome pre-state); cmd-deacd46a ok, fg=`com.google.android.apps.tachyon` via=tachyon, 408 ms (Gmail pre-state — a genuine switch into the Meet app); cmd-7b90d502 ok, fg=tachyon via=tachyon, 334 ms (Gmail pre-state again, spaced). Foreground sane afterward, queue empty. **link_open is live-verified; the v1.28 section's "NOT live-verified" label is superseded by this section.**
+
+## v1.35.0: command-driven routine firing (built + installed on the PHONE 2026-11-24)
+
+Full record: `docs/v1.35-routine-fire-2026-11-24.md`. The MacroDroid retirement build: a generic Samsung Routine firing module in Device Assistance, recovered from the pre-v1.23 `RoutineFirer` (GitHub `jonathancruzate/muse-phone-bridge` @ 8cd7445) and generalized to a 16-key registry: sleep, home, away, morning, theater, driving, exercise, work, relax, before_bed, commute_home, commute_work, meeting, power_standard, power_max, status_full.
+
+- **Firing is capture-based** (Samsung signature-gates the direct APIs): link once per key in-app via Samsung's CREATE_SHORTCUT picker, store the minted shortcut intent URI + routine name in prefs (`rf_link_<key>` / `rf_link_name_<key>`), replay to fire.
+- **Command-driven ONLY.** New native template `routine_fire <key>` (ShellAllowlist gate, fixed key pattern; typed errors not_linked / bal_blocked / routine_app_missing / fire_failed / profile_gated). There is NO Actuation engine, NO desired-poll firing, NO reconciler hook, NO arm switch: the v1.23 double-fire failure mode is excluded by construction. BridgeService and Reconciler are untouched.
+- **New native template `sound_set <sound|vibrate|mute>`** (AudioManager ringer + read-back; typed `policy_access_not_granted` without Notification Policy Access). DND stays on the existing `dnd_on` / `dnd_off` templates, never duplicated.
+- **MainActivity** gains a phone-only "Routine firing" link section (one Link button + linked-name display per key, request codes 80 to 95; deliberately no test-fire button, no arm checkbox). TV/Duo profiles gate the whole module off.
+- **Report gains `routine_fire`** (phone only): `{linked: {key: name or ''}, last_fire: {key, at, result}}`. Whitelist passthroughs shipped in the same handling in BOTH sanitizers (mode-sync Worker worker.js + box device-relay server.js, backups `*.bak-20261124-v135-routinefire`; Worker deployed with bindings preserved, relay restarted).
+- **Build:** 111 app classes, guards passed, APK 6,290,317 bytes, SHA-256 `19629e3e6f24b2a85ff278651df2f8ab78f8e00a1a871b2aa6ed8f072354146e`, family signer unchanged. Gate suite 300 PASS / 0 FAIL (28 new routine_fire + sound_set checks; legacy key `night` refused, the registry name is `sleep`).
+- **Installed on the phone** via self_update cmd-4fc54d34-24fe-418a-abe2-0d5c70212a63 (phone 1.33.0 code 48 to 1.35.0 code 50 in one step). Fresh relay report 2026-11-24T10:50:38Z: self_update stage installed, `routine_fire` present with all 16 keys unlinked and last_fire empty. The module is inert until Jonathan links routines in-app.
+- **Server-side prep (NOT activated):** mode-sync.sh, routine-control.sh, battery-guardian.py, and movie_bundle.py in the smart-home goal bin each gained a `PHONE_ACTUATOR` env switch (default `macrodroid`, live behavior unchanged; backups `*.bak-20261124-v135prep`). The `da` leg enqueues `routine_fire <key>` singly via phone-bridge-cmd.sh and verifies via the command result (done+ok) or, in mode-sync, the existing observed-report gate. Do NOT flip until all 16 keys are linked and read back in the report.
+- **Low Battery verdict:** nothing acts on MacroDroid's Low Battery status POST (battery-guardian samples the phone itself), and DA's battery push channel was removed in v1.33.0. The Low Battery macro needs no replacement. (The `BatteryPush.java` under `github-export/app/src` is a stale pre-v1.33 snapshot, not live source.)

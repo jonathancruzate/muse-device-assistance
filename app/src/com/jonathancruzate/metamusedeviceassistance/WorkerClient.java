@@ -175,6 +175,10 @@ public final class WorkerClient {
             // v1.30: voicemail module state, phone only (enabled,
             // role_held, last export bookkeeping; no content).
             if (!nonPhone) body.put("voicemail", VoicemailModule.snapshot(ctx));
+            // v1.35: routine_fire registry state (linked names +
+            // last fire attempt), phone only: TV/Duo gate the
+            // module off entirely.
+            if (!nonPhone) body.put("routine_fire", RoutineFirer.snapshot(ctx));
 
             URL url = new URL(base + "/phone-bridge/report?secret="
                     + URLEncoder.encode(secret, "UTF-8"));

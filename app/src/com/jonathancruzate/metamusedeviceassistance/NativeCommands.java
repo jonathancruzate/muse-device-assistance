@@ -120,6 +120,10 @@ public final class NativeCommands {
                     return setDnd(ctx, true, t0);
                 case "dnd_off":
                     return setDnd(ctx, false, t0);
+                case "routine_fire":
+                    return RoutineFirer.execute(ctx, arg, t0);
+                case "sound_set":
+                    return setSound(ctx, arg, t0);
                 // Duo ops (duo_debug_*, duo_panels_get) are NOT
                 // here since v1.31.0: ShellBridge routes every
                 // duo_* op to the Duo Companion plugin via
@@ -189,6 +193,45 @@ public final class NativeCommands {
                 "dnd=" + (on ? "on" : "off") + " filter=" + cur,
                 System.currentTimeMillis() - t0,
                 cur == want ? null : "dnd_filter_mismatch: got " + cur);
+    }
+
+    /**
+     * v1.35: ringer mode via AudioManager (routine-control's sound
+     * branch replacement). setRingerMode into/out of silent needs
+     * Notification Policy Access on this build; without the grant
+     * the platform throws SecurityException, surfaced typed.
+     */
+    private static LoopbackAdb.Result setSound(Context ctx, String mode, long t0) {
+        AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) {
+            return new LoopbackAdb.Result(false, "",
+                    System.currentTimeMillis() - t0, "no audio service");
+        }
+        int want;
+        switch (mode) {
+            case "sound": want = AudioManager.RINGER_MODE_NORMAL; break;
+            case "vibrate": want = AudioManager.RINGER_MODE_VIBRATE; break;
+            case "mute": want = AudioManager.RINGER_MODE_SILENT; break;
+            default:
+                return new LoopbackAdb.Result(false, "",
+                        System.currentTimeMillis() - t0, "bad sound mode: " + mode);
+        }
+        try {
+            am.setRingerMode(want);
+        } catch (SecurityException e) {
+            BridgeLog.log(ctx, "SHELL", "sound_set refused: notification"
+                    + " policy access not granted");
+            return new LoopbackAdb.Result(false, "",
+                    System.currentTimeMillis() - t0,
+                    "policy_access_not_granted: Muse Device Assistance"
+                            + " lacks Notification Policy Access");
+        }
+        int cur = am.getRingerMode();
+        BridgeLog.log(ctx, "SHELL", "sound_set mode=" + mode + " ringer now=" + cur);
+        return new LoopbackAdb.Result(cur == want,
+                "sound=" + mode + " ringer=" + cur,
+                System.currentTimeMillis() - t0,
+                cur == want ? null : "ringer_mismatch: got " + cur);
     }
 
     private static LoopbackAdb.Result setTorch(Context ctx, boolean on, long t0) {

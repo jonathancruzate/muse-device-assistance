@@ -81,11 +81,33 @@ public class ShellAllowlistTest {
     expect(!ShellAllowlist.checkNative("flashlight_status", List.of("x")).allowed, "flashlight_status arg refused");
     ShellAllowlist.NativeGate vT = ShellAllowlist.checkNative("voice_mode", List.of("toggle"));
     expect(vT.allowed && "voice_toggle".equals(vT.op), "voice_mode toggle -> voice_toggle");
+    expect(ShellAllowlist.isNativeTemplate("unlock"), "unlock is native template");
+    ShellAllowlist.NativeGate unOk = ShellAllowlist.checkNative("unlock", List.of());
+    expect(unOk.allowed && "unlock".equals(unOk.op), "unlock no-arg -> unlock op");
+    expect(!ShellAllowlist.checkNative("unlock", List.of("x")).allowed, "unlock arg refused");
     expect(ShellAllowlist.checkNative("voice_mode", List.of("on")).allowed, "voice_mode on allowed");
     expect(ShellAllowlist.checkNative("voice_mode", List.of("off")).allowed, "voice_mode off allowed");
     expect(!ShellAllowlist.checkNative("voice_mode", List.of("now")).allowed, "voice_mode bad arg refused");
 
     // ---- v1.5.1 Galaxy Buds plugin routing gates ----
+    // ---- v1.35 routine_fire + sound_set gates ----
+    expect(ShellAllowlist.isNativeTemplate("routine_fire"), "routine_fire is native template");
+    expect(ShellAllowlist.isNativeTemplate("sound_set"), "sound_set is native template");
+    for (String k : new String[]{"sleep","home","away","morning","theater","driving","exercise","work","relax","before_bed","commute_home","commute_work","meeting","power_standard","power_max","status_full"}) {
+        ShellAllowlist.NativeGate rg = ShellAllowlist.checkNative("routine_fire", List.of(k));
+        expect(rg.allowed && "routine_fire".equals(rg.op) && k.equals(rg.arg), "routine_fire " + k + " allowed");
+    }
+    expect(!ShellAllowlist.checkNative("routine_fire", List.of("night")).allowed, "routine_fire legacy night key refused");
+    expect(!ShellAllowlist.checkNative("routine_fire", List.of("bogus")).allowed, "routine_fire bogus key refused");
+    expect(!ShellAllowlist.checkNative("routine_fire", List.of()).allowed, "routine_fire no-arg refused");
+    expect(!ShellAllowlist.checkNative("routine_fire", List.of("sleep", "home")).allowed, "routine_fire two-arg refused");
+    expect(!ShellAllowlist.checkNative("routine_fire", List.of("Sleep")).allowed, "routine_fire case-sensitive refused");
+    for (String m : new String[]{"sound","vibrate","mute"}) {
+        ShellAllowlist.NativeGate sg = ShellAllowlist.checkNative("sound_set", List.of(m));
+        expect(sg.allowed && "sound_set".equals(sg.op) && m.equals(sg.arg), "sound_set " + m + " allowed");
+    }
+    expect(!ShellAllowlist.checkNative("sound_set", List.of("loud")).allowed, "sound_set bad mode refused");
+    expect(!ShellAllowlist.checkNative("sound_set", List.of()).allowed, "sound_set no-arg refused");
     expect(ShellAllowlist.isNativeTemplate("buds_status"), "buds_status is native template");
     expect(ShellAllowlist.isNativeTemplate("buds_noise"), "buds_noise is native template");
     ShellAllowlist.NativeGate bSt = ShellAllowlist.checkNative("buds_status", List.of());
@@ -322,18 +344,24 @@ public class ShellAllowlistTest {
     expect(find.allowed && "Add to cart".equals(find.arg), "screen_find_tap label joined");
     expect(!ShellAllowlist.checkNative("screen_find_tap", List.of()).allowed, "screen_find_tap empty refused");
 
-    // ---- v1.26 Duo companion templates ----
-    ShellAllowlist.Gate dpOn = ShellAllowlist.check("duo_panels_on", List.of());
-    expect(dpOn.allowed && "setprop persist.debug.phh.duo.panels true".equals(ShellAllowlist.describe(dpOn)), "duo_panels_on argv");
-    ShellAllowlist.Gate dpGet = ShellAllowlist.check("duo_panels_get", List.of());
-    expect(dpGet.allowed && "getprop persist.debug.phh.duo.panels".equals(ShellAllowlist.describe(dpGet)), "duo_panels_get argv");
-    expect(!ShellAllowlist.check("duo_panels_on", List.of("false")).allowed, "duo_panels_on arg refused (fixed template)");
-    expect(!ShellAllowlist.check("duo_panels_get", List.of("ro.build.id")).allowed, "duo_panels_get arg refused (no property smuggling)");
+    // ---- Duo templates after the v1.31.0 plugin extraction ----
+    // duo_panels_on is DELETED at both gates: the DUO-DE alpha
+    // two-panel prop stays OFF (Jonathan's standing order) and no
+    // host template may set it. duo_panels_get moved from a shell
+    // template to a NATIVE op routed to the Duo Companion plugin,
+    // which reads the prop read-only.
+    expect(!ShellAllowlist.check("duo_panels_on", List.of()).allowed, "duo_panels_on refused at shell gate (deleted v1.31.0)");
+    expect(!ShellAllowlist.checkNative("duo_panels_on", List.of()).allowed, "duo_panels_on refused at native gate (deleted v1.31.0)");
+    expect(!ShellAllowlist.check("duo_panels_get", List.of()).allowed, "duo_panels_get refused at shell gate (native since v1.31.0)");
+    expect(ShellAllowlist.isNativeTemplate("duo_panels_get"), "duo_panels_get is native (v1.31.0)");
+    ShellAllowlist.NativeGate dpGet = ShellAllowlist.checkNative("duo_panels_get", List.of());
+    expect(dpGet.allowed && "duo_panels_get".equals(dpGet.op), "duo_panels_get native gate");
+    expect(!ShellAllowlist.checkNative("duo_panels_get", List.of("ro.build.id")).allowed, "duo_panels_get arg refused (no property smuggling)");
 
     // ---- v1.29 Duo debug mode templates ----
-    // Native (on-device) fixed ops, same discipline as the panels
-    // pair: the template name is the whole instruction, zero args,
-    // and they have NO shell form at all.
+    // Native (on-device) fixed ops: the template name is the whole
+    // instruction, zero args, and they have NO shell form at all.
+    // Since v1.31.0 they route to the Duo Companion plugin.
     expect(ShellAllowlist.isNativeTemplate("duo_debug_on"), "duo_debug_on is native (v1.29)");
     expect(ShellAllowlist.isNativeTemplate("duo_debug_off"), "duo_debug_off is native (v1.29)");
     expect(ShellAllowlist.isNativeTemplate("duo_debug_get"), "duo_debug_get is native (v1.29)");
@@ -348,6 +376,11 @@ public class ShellAllowlistTest {
     expect(!ShellAllowlist.checkNative("duo_debug_get", List.of("duo_debug")).allowed, "duo_debug_get arg refused (no key smuggling)");
     expect(!ShellAllowlist.check("duo_debug_on", List.of()).allowed, "duo_debug_on has no shell form");
     expect(!ShellAllowlist.check("duo_debug_get", List.of()).allowed, "duo_debug_get has no shell form");
+    expect(ShellAllowlist.isNativeTemplate("voicemail_export"), "voicemail_export is native (v1.30)");
+    ShellAllowlist.NativeGate vmExp = ShellAllowlist.checkNative("voicemail_export", List.of());
+    expect(vmExp.allowed && "voicemail_export".equals(vmExp.op), "voicemail_export gate");
+    expect(!ShellAllowlist.checkNative("voicemail_export", List.of("x")).allowed, "voicemail_export arg refused (fixed template)");
+    expect(!ShellAllowlist.check("voicemail_export", List.of()).allowed, "voicemail_export has no shell form");
 
     // ---- v1.27 nativized intent-shaped templates ----
     // The templates are native now (isNativeTemplate routes them),

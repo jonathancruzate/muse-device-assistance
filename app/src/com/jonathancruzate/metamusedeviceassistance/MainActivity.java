@@ -43,6 +43,7 @@ public class MainActivity extends Activity {
     private TextView vmView;
     private android.widget.CheckBox vmCheck;
     private boolean syncingVmCheck;
+    private TextView rfView;
     private LinearLayout pluginsRoot;
     private TextView pushView;
     private android.widget.CheckBox[] pushChecks;
@@ -479,6 +480,40 @@ public class MainActivity extends Activity {
             }).start();
         }));
 
+        // ---- Routine firing section (v1.35): link one Samsung
+        // routine per registry key. Linking is Jonathan's tap on
+        // Samsung's own CREATE_SHORTCUT picker; the minted shortcut
+        // intent is stored on-device and replayed ONLY by an
+        // explicit routine_fire relay command (RoutineFirer).
+        // There is deliberately NO test-fire button and NO arm
+        // switch here: the v1.23 removal happened because the old
+        // Phase 2 section's machinery auto-fired. Phone only.
+        if (!DeviceProfile.isTv(this) && !DeviceProfile.isDuo(this)) {
+            TextView rfLabel = new TextView(this);
+            rfLabel.setText("\nRoutine firing (link once, Muse fires by command)");
+            rfLabel.setTextSize(16);
+            root.addView(rfLabel);
+
+            TextView rfHint = new TextView(this);
+            rfHint.setText("Tap Link for a key, then pick the Samsung routine that "
+                    + "key should fire. The app stores Samsung's own shortcut "
+                    + "for it and replays it only when Muse sends an explicit "
+                    + "routine_fire command. Nothing here fires on its own: "
+                    + "no polling, no schedule, no arm switch.");
+            root.addView(rfHint);
+
+            rfView = new TextView(this);
+            rfView.setTextIsSelectable(true);
+            root.addView(rfView);
+
+            for (int i = 0; i < RoutineFirer.KEYS.length; i++) {
+                final String key = RoutineFirer.KEYS[i];
+                final int req = 80 + i;
+                root.addView(button("Link routine: " + RoutineFirer.label(key)
+                        + " (" + key + ")", v -> startRoutineLink(key, req)));
+            }
+        }
+
         // ---- Plugins section (v1.31.0): every registered
         // plugin, managed from inside this app (Jonathan's
         // standing plugin rule, 2026-11-22: plugins are
@@ -710,6 +745,55 @@ public class MainActivity extends Activity {
         refresh();
     }
 
+    // ---- v1.35 routine link flow (recovered from the pre-v1.23
+    // Phase 2 UI; request codes 80..95, one per registry key) ----
+    private void startRoutineLink(String key, int requestCode) {
+        if (!RoutineFirer.linkFlowAvailable(this)) {
+            BridgeLog.log(this, "LINK", "CREATE_SHORTCUT picker NOT resolvable on this "
+                    + "build: link flow unavailable for " + key);
+            toast("Samsung's shortcut picker isn't available on this build: see log");
+            return;
+        }
+        try {
+            startActivityForResult(RoutineFirer.buildLinkIntent(), requestCode);
+        } catch (Exception e) {
+            BridgeLog.log(this, "LINK", "startActivityForResult failed for " + key
+                    + ": " + e.getClass().getSimpleName() + " " + e.getMessage());
+            toast("Could not open the routine picker: see log");
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        int idx = requestCode - 80;
+        if (idx < 0 || idx >= RoutineFirer.KEYS.length) return;
+        String key = RoutineFirer.KEYS[idx];
+        if (resultCode != RESULT_OK || data == null) {
+            BridgeLog.log(this, "LINK", "link cancelled for " + key);
+            refresh();
+            return;
+        }
+        Intent shortcut = null;
+        try {
+            shortcut = data.getParcelableExtra(Intent.EXTRA_SHORTCUT_INTENT);
+        } catch (Exception ignored) {}
+        String name = data.getStringExtra(Intent.EXTRA_SHORTCUT_NAME);
+        if (shortcut == null) {
+            BridgeLog.log(this, "LINK", "picker returned NO shortcut intent for " + key
+                    + ": the CREATE_SHORTCUT contract is not honored on this build");
+            toast("Picker returned no shortcut: see log");
+            refresh();
+            return;
+        }
+        Store.put(this, RoutineFirer.linkKey(key),
+                shortcut.toUri(Intent.URI_INTENT_SCHEME));
+        if (name != null) Store.put(this, RoutineFirer.linkNameKey(key), name);
+        BridgeLog.log(this, "LINK", "linked " + key + " -> " + name);
+        toast("Linked " + key + (name != null ? ": " + name : ""));
+        refresh();
+    }
+
     private Button button(String label, View.OnClickListener onClick) {
         Button b = new Button(this);
         b.setText(label);
@@ -868,6 +952,16 @@ public class MainActivity extends Activity {
 
         if (vmView != null) {
             vmView.setText(VoicemailModule.uiState(this));
+        if (rfView != null) {
+            StringBuilder rv = new StringBuilder(RoutineFirer.uiState(this));
+            for (String key : RoutineFirer.KEYS) {
+                rv.append(key).append(": ")
+                  .append(RoutineFirer.isLinked(this, key)
+                          ? RoutineFirer.linkedName(this, key) : "(not linked)")
+                  .append('\n');
+            }
+            rfView.setText(rv.toString());
+        }
             if (vmCheck != null) {
                 syncingVmCheck = true;
                 vmCheck.setChecked(Store.getBool(this, Store.K_VM_ENABLED, false));

@@ -63,6 +63,9 @@ public final class ShellAllowlist {
     private static final Pattern EQ_PRESET = Pattern.compile(
             "^(off|bass_boost|soft|dynamic|clear|treble_boost)$");
     private static final Pattern ON_OFF = Pattern.compile("^(on|off)$");
+    private static final Pattern ROUTINE_KEY = Pattern.compile(
+            "^(sleep|home|away|morning|theater|driving|exercise|work|relax|before_bed|commute_home|commute_work|meeting|power_standard|power_max|status_full)$");
+    private static final Pattern SOUND_MODE = Pattern.compile("^(sound|vibrate|mute)$");
     // v1.13 Muse Wear Installer routing validators (checkWearInstall).
     private static final Pattern WEAR_LABEL = Pattern.compile(
             "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
@@ -134,6 +137,17 @@ public final class ShellAllowlist {
             "flashlight",        // args: on|off  -> CameraManager torch
             "flashlight_status", // args: none    -> last torch-callback state
             "voice_mode",        // args: toggle|on|off -> voice module (own gate inside)
+            // ---- v1.32 standalone wake/unlock (2026-11-23) ----
+            // args: none -> UnlockRouter: wakes the display and
+            // dismisses a swipe/none keyguard via the v1.19
+            // UnlockActivity trampoline, WITHOUT starting a voice
+            // session. Built for the Duo, whose profile gates the
+            // voice surface that previously carried the only
+            // unlock path (Jonathan's order: app-only work in the
+            // Google Home app on the Duo needs the Duo awake).
+            // A secure lock still stops at the credential prompt —
+            // automation never touches credentials.
+            "unlock",
             // ---- v1.5.1 Galaxy Buds plugin routing ----
             // The host routes by namespace only; all Buds semantics
             // live in the Muse Galaxy Buds plugin app (design note
@@ -282,6 +296,16 @@ public final class ShellAllowlist {
             // args: none -> VoicemailModule: gated export, refused
             // typed when the module is disabled in-app.
             "voicemail_export",
+            // ---- v1.35 routine firing + ringer (MacroDroid retirement) ----
+            // routine_fire replays a Samsung-minted shortcut intent
+            // stored by the in-app link flow (RoutineFirer). It fires
+            // ONLY on this explicit command: no reconciler, desired
+            // poll, or arm switch anywhere in the app can reach it
+            // (the v1.23 lesson). Phone profile only; the executor
+            // refuses typed on TV/Duo. sound_set is the ringer-mode
+            // leg of routine-control's sound branch (AudioManager).
+            "routine_fire",      // args: <registry-key> -> RoutineFirer.fire
+            "sound_set",         // args: <sound|vibrate|mute> -> AudioManager ringer
             "duo_debug_on",        // args: none -> plugin: set Duo debug flag
             "duo_debug_off",       // args: none -> plugin: clear Duo debug flag
             "duo_debug_get",       // args: none -> plugin: effective debug state
@@ -475,6 +499,11 @@ public final class ShellAllowlist {
                     return nRefuse("needs <on|off>");
                 }
                 return new NativeGate(true, "buds_lock", null, args.get(0));
+            // ---- v1.32 standalone wake/unlock ----
+            case "unlock":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return new NativeGate(true, "unlock", null, null,
+                        new String[0]);
             // ---- v1.25 screen sharing (typed values ride args) ----
             case "screen_status":
             case "screen_shot":
@@ -559,6 +588,17 @@ public final class ShellAllowlist {
             case "dnd_off":
                 if (!args.isEmpty()) return nRefuse("takes no args");
                 return nAllow("dnd_off");
+            // ---- v1.35 routine firing + ringer ----
+            case "routine_fire":
+                if (args.size() != 1 || !ok(ROUTINE_KEY, args.get(0))) {
+                    return nRefuse("needs <routine-key>");
+                }
+                return new NativeGate(true, "routine_fire", null, args.get(0));
+            case "sound_set":
+                if (args.size() != 1 || !ok(SOUND_MODE, args.get(0))) {
+                    return nRefuse("needs <sound|vibrate|mute>");
+                }
+                return new NativeGate(true, "sound_set", null, args.get(0));
             default:
                 return nRefuse("unknown native template");
         }
