@@ -44,3 +44,33 @@ this tree (1.31.0) carries the bitmap banner automatically.** Until
 that build is installed on the Shield, the TV keeps v1.30.3 (vc44)
 and its banner still crops in Projectivy. The phone is unaffected
 (stays on 1.30.1 under the owning handling; banner is TV-only).
+
+## Follow-up 2026-11-23: shipped and verified on the Shield
+
+Jonathan reported at 23:50 EST that the DA banner was still broken.
+Live probe showed why, in two parts:
+
+1. The Shield never received 1.31.0: it was still on 1.30.3 (vc44),
+   lastUpdateTime 2026-11-22 00:26:02, and the pulled base.apk's
+   banner still resolved to `res/drawable-anydpi-v26/tv_banner.xml`.
+   The crop was re-confirmed on screen with DA focused
+   (`~/workspace/muse-app-logos/banner-fix-2026-11-22/da-state-2026-11-23.png`).
+2. The 1.31.0 APK in this workspace would not have fixed it anyway:
+   built 2026-11-22 07:54, before the wire-in above landed, its
+   badging still shows the adaptive banner and the fg/bg entries.
+
+The first build carrying this fix is 1.33.0 (vc48): badging banner =
+`res/drawable-mdpi-v4/tv_banner.png`, no anydpi banner XML or fg/bg
+entries, xxxhdpi banner pixel-identical to the master export. It
+was installed on the Shield only (`install -r`; streamed install
+after incremental was refused). Read-back: 1.33.0/vc48,
+lastUpdateTime 2026-11-23 23:57:41; installed base.apk SHA-256
+`c2fa1dd6beb2ed2569f2e6ff9a2b9251894d6be575880294654b45efb88b06f5`,
+byte-identical to the workspace APK. After `pm trim-caches` +
+reboot (GadgetService relaunched post-reboot per procedure; DA
+BridgeService running), rendering is verified: focused and
+unfocused cards both show the complete M, the full badge, and
+"Muse DA" with margins
+(`da-fixed-focused-2026-11-23.png`, `da-fixed-unfocused-2026-11-23.png`
+in the banner-fix folder). The banner item is closed; the phone was
+not touched.
