@@ -894,8 +894,11 @@ async function handleScreenViewGet(request, env) {
 // ==== File fetch (v1.36; app design docs/v1.36-files-subfolders-fetch-2026-11-24.md) ====
 // The phone uploads ONE image (base64-in-JSON, the screen-frame
 // discipline) from a files_get command; this side verifies the
-// SHA-256 against the decoded bytes and the magic bytes against
-// the claimed image type, then stores the binary beside the JSON
+// SHA-256 against the decoded bytes and sniffs the real image
+// format from the magic bytes (the claimed extension is NOT
+// trusted: a mislabeled genuine image is stored under its real
+// format's extension, bytes matching no image format are refused),
+// then stores the binary beside the JSON
 // store (JSON cannot hold it) and serves it raw. One fetch slot:
 // a new fetch replaces the previous one, whatever its extension.
 const FILES_FETCH_MAX_BYTES = 2500000;
@@ -910,22 +913,38 @@ function filesFetchPath(ext) {
 }
 
 function filesMagicOk(ext, buf) {
-  if (ext === 'jpg' || ext === 'jpeg') {
-    return buf.length >= 3 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF;
+  return filesSniffExt(buf) === filesCanonExt(ext);
+}
+
+// Canonical extension for a claimed image type ('jpeg' folds to 'jpg').
+function filesCanonExt(ext) {
+  return ext === 'jpeg' ? 'jpg' : ext;
+}
+
+// Sniff the REAL image format from magic bytes, independent of the
+// claimed extension. Returns the canonical extension or null when the
+// bytes are not a supported image. Added 2026-11-24 after the ABG
+// phone pass found 30 Pictures/Reddit files named .jpg whose bytes
+// are WebP (RIFF....WEBP): the relay had trusted the claimed ext and
+// rejected them all as magic mismatches. Verified magic bytes are
+// the ground truth; a mislabeled extension is corrected, not refused.
+function filesSniffExt(buf) {
+  if (buf.length >= 3 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) {
+    return 'jpg';
   }
-  if (ext === 'png') {
-    return buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50
-      && buf[2] === 0x4E && buf[3] === 0x47 && buf[4] === 0x0D
-      && buf[5] === 0x0A && buf[6] === 0x1A && buf[7] === 0x0A;
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50
+    && buf[2] === 0x4E && buf[3] === 0x47 && buf[4] === 0x0D
+    && buf[5] === 0x0A && buf[6] === 0x1A && buf[7] === 0x0A) {
+    return 'png';
   }
-  if (ext === 'gif') {
-    return buf.length >= 6 && buf.toString('latin1', 0, 4) === 'GIF8';
+  if (buf.length >= 6 && buf.toString('latin1', 0, 4) === 'GIF8') {
+    return 'gif';
   }
-  if (ext === 'webp') {
-    return buf.length >= 12 && buf.toString('latin1', 0, 4) === 'RIFF'
-      && buf.toString('latin1', 8, 12) === 'WEBP';
+  if (buf.length >= 12 && buf.toString('latin1', 0, 4) === 'RIFF'
+    && buf.toString('latin1', 8, 12) === 'WEBP') {
+    return 'webp';
   }
-  return false;
+  return null;
 }
 
 async function handleFilesFetchPost(request, env) {
@@ -951,18 +970,27 @@ async function handleFilesFetchPost(request, env) {
   }
   const digest = crypto.createHash('sha256').update(buf).digest('hex');
   if (digest !== sha) return json({ error: 'sha256 mismatch' }, 400);
-  if (!filesMagicOk(ext, buf)) return json({ error: 'magic bytes mismatch' }, 400);
+  // Trust verified magic bytes over the claimed extension: a genuine
+  // image whose name mislabels its format is stored under the REAL
+  // format's extension; bytes matching no supported image are still
+  // refused outright.
+  const realExt = filesSniffExt(buf);
+  if (!realExt) return json({ error: 'magic bytes mismatch' }, 400);
+  const claimedExt = ext;
+  const storeExt = realExt;
   for (const e of FILES_FETCH_EXTS) {
-    if (e !== ext) { try { await fsp.unlink(filesFetchPath(e)); } catch (_) {} }
+    if (e !== storeExt) { try { await fsp.unlink(filesFetchPath(e)); } catch (_) {} }
   }
-  const tmp = filesFetchPath(ext) + '.tmp-' + process.pid + '-' + crypto.randomBytes(6).toString('hex');
+  const tmp = filesFetchPath(storeExt) + '.tmp-' + process.pid + '-' + crypto.randomBytes(6).toString('hex');
   await fsp.writeFile(tmp, buf);
-  await fsp.rename(tmp, filesFetchPath(ext));
+  await fsp.rename(tmp, filesFetchPath(storeExt));
   const meta = {
     name: capStr(body.name, 256),
     folder: capStr(body.folder, 64),
     sub: capStr(body.sub, 256),
-    ext,
+    ext: storeExt,
+    claimed_ext: claimedExt,
+    format_mismatch: filesCanonExt(claimedExt) !== realExt,
     size: buf.length,
     sha256: digest,
     device_ts: Number.isFinite(body.ts) ? body.ts : 0,
@@ -970,7 +998,7 @@ async function handleFilesFetchPost(request, env) {
     received_ms: Date.now(),
   };
   await env.MODE_SYNC.put('files:fetch', JSON.stringify(meta));
-  return json({ ok: true, bytes: buf.length, sha256: digest });
+  return json({ ok: true, bytes: buf.length, sha256: digest, ext: storeExt, claimed_ext: claimedExt });
 }
 
 async function handleFilesFetchMetaGet(request, env) {
