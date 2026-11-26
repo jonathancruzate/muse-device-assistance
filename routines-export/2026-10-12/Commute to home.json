@@ -1,0 +1,1 @@
+{"document_id":"com.samsung.android.app.routines\/routine","version":"1","name":"Commute to home","conditions":[{"package":"com.samsung.android.app.routines","tag":"context\/get_off_work","intent_param":"","is_negative":-1}],"actions":[{"package":"com.samsung.android.app.routines","tag":"lockscreen_shortcut_v3","intent_param":"","is_negative":-1}]}
