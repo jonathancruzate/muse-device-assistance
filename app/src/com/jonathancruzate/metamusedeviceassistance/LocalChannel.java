@@ -69,13 +69,15 @@ public class LocalChannel extends ContentProvider {
 
     // ---- Pairing lifecycle (called from MainActivity) ----
 
-    /** Open the claim window with a fresh pending token. */
-    public static void openPairingWindow(Context ctx) {
+    /** Open the claim window with a fresh pending token.
+     *  Returns the window expiry (epoch ms). */
+    public static long openPairingWindow(Context ctx) {
         String token = randomToken();
+        long until = System.currentTimeMillis() + PAIR_WINDOW_MS;
         Store.put(ctx, Store.K_LC_PENDING_TOKEN, token);
-        Store.put(ctx, Store.K_LC_PENDING_UNTIL,
-                System.currentTimeMillis() + PAIR_WINDOW_MS);
+        Store.put(ctx, Store.K_LC_PENDING_UNTIL, until);
         BridgeLog.log(ctx, "LOCAL", "pairing window opened (5 min)");
+        return until;
     }
 
     /** Revoke from this side: drop token and pending window. */
@@ -106,6 +108,13 @@ public class LocalChannel extends ContentProvider {
                     !Store.get(ctx, Store.K_LC_TOKEN, "").isEmpty());
             o.put("count", Store.getLong(ctx, Store.K_LC_COUNT, 0));
             o.put("refused", Store.getLong(ctx, Store.K_LC_REFUSED, 0));
+            o.put("window_open",
+                    Store.getLong(ctx, Store.K_LC_PENDING_UNTIL, 0)
+                            > System.currentTimeMillis());
+            o.put("last_refusal",
+                    Store.get(ctx, Store.K_LC_LAST_REFUSAL, ""));
+            o.put("last_refusal_at",
+                    Store.getLong(ctx, Store.K_LC_LAST_REFUSAL_AT, 0));
             long at = Store.getLong(ctx, Store.K_LC_LAST_AT, 0);
             if (at > 0) {
                 JSONObject last = new JSONObject();
@@ -312,6 +321,9 @@ public class LocalChannel extends ContentProvider {
     private void refuse(Context ctx, String why) {
         Store.put(ctx, Store.K_LC_REFUSED,
                 Store.getLong(ctx, Store.K_LC_REFUSED, 0) + 1);
+        Store.put(ctx, Store.K_LC_LAST_REFUSAL, why);
+        Store.put(ctx, Store.K_LC_LAST_REFUSAL_AT,
+                System.currentTimeMillis());
         BridgeLog.log(ctx, "LOCAL", "REFUSED " + why);
     }
 

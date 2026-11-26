@@ -88,6 +88,11 @@ public final class Store {
     public static final String K_LC_REFUSED = "lc_refused";
     public static final String K_LC_WINDOW_START = "lc_window_start";
     public static final String K_LC_WINDOW_COUNT = "lc_window_count";
+    // v1.37 local pairing fix: last refusal reason + timestamp, so a
+    // failed pairing attempt is diagnosable from the relay report
+    // instead of only from the on-device log.
+    public static final String K_LC_LAST_REFUSAL = "lc_last_refusal";
+    public static final String K_LC_LAST_REFUSAL_AT = "lc_last_refusal_at";
 
     // v1.5 extension pack — native (on-device) commands.
     // Routine firing (v1.35) — last routine_fire attempt's

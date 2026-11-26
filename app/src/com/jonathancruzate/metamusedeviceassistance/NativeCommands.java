@@ -124,6 +124,8 @@ public final class NativeCommands {
                     return RoutineFirer.execute(ctx, arg, t0);
                 case "sound_set":
                     return setSound(ctx, arg, t0);
+                case "local_pair_open":
+                    return openLocalPairing(ctx, t0);
                 // Duo ops (duo_debug_*, duo_panels_get) are NOT
                 // here since v1.31.0: ShellBridge routes every
                 // duo_* op to the Duo Companion plugin via
@@ -154,6 +156,26 @@ public final class NativeCommands {
                     System.currentTimeMillis() - t0,
                     e.getClass().getSimpleName() + " " + e.getMessage());
         }
+    }
+
+    /**
+     * v1.37: open the Muse Launcher Pack pairing window from a
+     * relay command (LocalChannel.openPairingWindow), so pairing
+     * no longer requires Jonathan to tap inside Device Assistance
+     * first. Phone profile only, following the RoutineFirer
+     * profile-gate pattern: TV/Duo refuse typed. Success carries
+     * the window expiry (epoch ms) in the output.
+     */
+    private static LoopbackAdb.Result openLocalPairing(Context ctx, long t0) {
+        if (DeviceProfile.isTv(ctx) || DeviceProfile.isDuo(ctx)) {
+            return new LoopbackAdb.Result(false, "",
+                    System.currentTimeMillis() - t0,
+                    "profile_gated: local_pair_open is phone-only");
+        }
+        long until = LocalChannel.openPairingWindow(ctx);
+        return new LoopbackAdb.Result(true,
+                "pairing_window_open until=" + until,
+                System.currentTimeMillis() - t0, null);
     }
 
     /**

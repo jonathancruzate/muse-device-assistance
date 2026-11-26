@@ -644,6 +644,12 @@ public class ShellAllowlistTest {
     expect(!ShellAllowlist.check("link_open", List.of(zoomUrl)).allowed,
             "link_open has no shell form");
 
+    // ---- v1.37 local_pair_open gate ----
+    expect(ShellAllowlist.isNativeTemplate("local_pair_open"), "local_pair_open is native template");
+    ShellAllowlist.NativeGate lpOk = ShellAllowlist.checkNative("local_pair_open", List.of());
+    expect(lpOk.allowed && "local_pair_open".equals(lpOk.op), "local_pair_open no-arg -> local_pair_open op");
+    expect(!ShellAllowlist.checkNative("local_pair_open", List.of("x")).allowed, "local_pair_open arg refused");
+
     System.out.println(fails==0?"ALL_PASS":"FAILURES:"+fails);
   }
 }

@@ -307,6 +307,14 @@ public final class ShellAllowlist {
             // leg of routine-control's sound branch (AudioManager).
             "routine_fire",      // args: <registry-key> -> RoutineFirer.fire
             "sound_set",         // args: <sound|vibrate|mute> -> AudioManager ringer
+            // ---- v1.37 local pairing fix ----
+            // args: none -> NativeCommands: opens the Muse
+            // Launcher Pack pairing window on this phone
+            // (LocalChannel.openPairingWindow), so pairing no
+            // longer requires an in-app tap in Device Assistance.
+            // Phone profile only; the executor refuses typed on
+            // TV/Duo profiles.
+            "local_pair_open",
             "duo_debug_on",        // args: none -> plugin: set Duo debug flag
             "duo_debug_off",       // args: none -> plugin: clear Duo debug flag
             "duo_debug_get",       // args: none -> plugin: effective debug state
@@ -600,6 +608,10 @@ public final class ShellAllowlist {
                     return nRefuse("needs <sound|vibrate|mute>");
                 }
                 return new NativeGate(true, "sound_set", null, args.get(0));
+            // ---- v1.37 local pairing fix ----
+            case "local_pair_open":
+                if (!args.isEmpty()) return nRefuse("takes no args");
+                return nAllow("local_pair_open");
             default:
                 return nRefuse("unknown native template");
         }
